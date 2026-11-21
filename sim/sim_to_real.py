@@ -87,7 +87,7 @@ def window_labels(flag: np.ndarray, starts) -> np.ndarray:
 
 
 def sim_sample_labels(df: pd.DataFrame) -> np.ndarray:
-    lab, _ = detect_contacts(df, jerk_thresh=28.0, accel_peak_thresh=2.2, slip_hpf_thresh=0.55)
+    lab, _ = detect_contacts(df, jerk_thresh=15.0, accel_peak_thresh=1.2, slip_hpf_thresh=0.5)
     flag = lab["contact_flag"].to_numpy(int)
     if "sim_contact_force_n" in df:
         F = df["sim_contact_force_n"].to_numpy(float)

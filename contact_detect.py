@@ -55,8 +55,8 @@ def add_features(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def detect_contacts(df: pd.DataFrame, jerk_thresh: float = 45.0, accel_peak_thresh: float = 3.5,
-                    slip_hpf_thresh: float = 0.75, refractory_s: float = 0.25):
+def detect_contacts(df: pd.DataFrame, jerk_thresh: float = 20.0, accel_peak_thresh: float = 1.5,
+                    slip_hpf_thresh: float = 0.6, refractory_s: float = 0.25):
     """Return (labelled copy of df, list of event dicts)."""
     out = add_features(df)
     n = len(out)
@@ -130,9 +130,9 @@ def main():
     ap.add_argument("input")
     ap.add_argument("--out")
     ap.add_argument("--events-json")
-    ap.add_argument("--jerk-thresh", type=float, default=45.0)
-    ap.add_argument("--accel-thresh", type=float, default=3.5)
-    ap.add_argument("--slip-thresh", type=float, default=0.75)
+    ap.add_argument("--jerk-thresh", type=float, default=20.0)
+    ap.add_argument("--accel-thresh", type=float, default=1.5)
+    ap.add_argument("--slip-thresh", type=float, default=0.6)
     a = ap.parse_args()
     p = Path(a.input)
     df = pd.read_parquet(p) if p.suffix == ".parquet" else pd.read_csv(p)
