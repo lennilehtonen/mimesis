@@ -26,7 +26,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from contact_detect import add_features  # noqa: E402
-from sim.retarget import GRIP_CLOSED, GRIP_OPEN, read_any, retarget_episode  # noqa: E402
+from sim.retarget import GRIP_CLOSED, GRIP_OPEN, read_any, retarget_episode, retarget_exact  # noqa: E402
 from sim.scene import PALETTE, configure_gl_backend, load_model_and_data  # noqa: E402
 
 PHYS_DT = 0.002
@@ -111,8 +111,11 @@ def simulate_variant(rt: pd.DataFrame, params: dict, render: bool = False, video
     """Run one variant. Returns (episode DataFrame @100 Hz, summary dict). Rendering on the calling thread."""
     import mujoco
 
+    exact = str(rt.attrs.get("retarget_mode", "")).startswith("exact")
+    base_xy = rt.attrs.get("object_xy", (0.0, 0.0)) if exact else (0.0, 0.0)
+    obj_xy = [float(base_xy[0]) + float(params["obj_xy"][0]), float(base_xy[1]) + float(params["obj_xy"][1])]
     m, d = load_model_and_data(params["obj_type"], params["obj_mass_kg"], params["obj_friction"],
-                               params["obj_scale"], params["obj_xy"], params["rgba"])
+                               params["obj_scale"], obj_xy, params["rgba"])
     obj_bid = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, "target_obj")
     wrist_bid = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, "wrist_body")
     mocap_id = int(m.body_mocapid[mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, "wrist_mocap")])
@@ -123,7 +126,11 @@ def simulate_variant(rt: pd.DataFrame, params: dict, render: bool = False, video
     obj_jadr = m.jnt_qposadr[m.body_jntadr[obj_bid]]
 
     warp = params["time_warp"]
-    rt = crop_retarget(rt, max_episode_s / warp)
+    if exact:  # replay the human timing 1:1: no time warp, no crop, full length
+        warp = 1.0
+        max_episode_s = max(max_episode_s, float(rt["t_s"].iloc[-1]))
+    else:
+        rt = crop_retarget(rt, max_episode_s / warp)
     t_traj = rt["t_s"].to_numpy(float) * warp
     T = min(float(t_traj[-1]), max_episode_s)
     P = rt[["mocap_x", "mocap_y", "mocap_z"]].to_numpy(float)
@@ -267,26 +274,50 @@ def _call_export(lerobot_out, variants, task, out_dir):
         return None
 
 
+def nominal_params(i: int = 0) -> dict:
+    """Nominal object: cup, 0.25 kg, mu 0.8, scale 1, no offset, no time warp."""
+    return {"variant_idx": i, "obj_type": "cup", "obj_friction": 0.8, "obj_mass_kg": 0.25, "obj_scale": 1.0,
+            "obj_xy": [0.0, 0.0], "time_warp": 1.0, "rgba": list(PALETTE[0]), "hard": False, "noise_seed": 7}
+
+
 def run_augment(input_parquet, n: int = 20, render_n: int = 9, out_dir="data/sim_aug", lerobot_out=None,
-                task: str = "pick_place_mug", seed: int = 42, progress_cb=None) -> dict:
+                task: str = "pick_place_mug", seed: int = 42, progress_cb=None, exact=None,
+                nominal: bool = False) -> dict:
+    """exact: None (scripted/anchored retarget of input_parquet), a dict {hands_parquet, video_path, width,
+    height[, imu_df]} for a 1:1 hand copy, or a precomputed retarget_exact DataFrame. In exact mode every
+    variant replays the human timing 1:1 (time_warp 1.0, no crop) with the cup at attrs["object_xy"]
+    (+ the variant's +-1.5 cm offset). nominal=True uses nominal_params() for every variant."""
     configure_gl_backend()
     t_start = time.time()
-    inp = Path(input_parquet)
     out_dir = Path(out_dir)
     ep_dir, vid_dir = out_dir / "episodes", out_dir / "videos"
     ep_dir.mkdir(parents=True, exist_ok=True)
     vid_dir.mkdir(parents=True, exist_ok=True)
 
-    rt = retarget_episode(read_any(inp))
+    if exact is None:
+        inp = Path(input_parquet)
+        rt = retarget_episode(read_any(inp))
+    elif isinstance(exact, pd.DataFrame):
+        inp = Path(input_parquet or "exact")
+        rt = exact
+    else:
+        hp = Path(exact["hands_parquet"])
+        inp = Path(input_parquet) if input_parquet else hp
+        rt = retarget_exact(read_any(hp), int(exact["width"]), int(exact["height"]),
+                            video_path=exact.get("video_path"), imu_df=exact.get("imu_df"))
+    attrs = dict(rt.attrs)
     mode = rt.attrs.get("retarget_mode", "?")
     rt_path = out_dir / f"{inp.stem}_retarget.parquet"
     rt.to_parquet(rt_path, index=False)
+    rt.attrs.update(attrs)
     log(f"[augment] retarget {mode}: {len(rt)} rows ({rt['t_s'].iloc[-1]:.1f}s) -> {rt_path}")
 
     variants, labels = [], []
     n_ok = n_slip = 0
     for i in range(n):
-        p = sample_params(i, seed)
+        p = nominal_params(i) if nominal else sample_params(i, seed)
+        if exact is not None:
+            p["time_warp"] = 1.0
         ep_id = f"sim_v{i:04d}"
         render = i < render_n
         vpath = vid_dir / f"{ep_id}.mp4"
@@ -330,6 +361,7 @@ def run_augment(input_parquet, n: int = 20, render_n: int = 9, out_dir="data/sim
     (vid_dir / "labels.json").write_text(json.dumps(labels, indent=2))
     manifest = {
         "input": str(inp), "retarget_parquet": str(rt_path), "retarget_mode": mode, "task": task, "seed": seed,
+        "object_xy": attrs.get("object_xy"), "valid_frac": attrs.get("valid_frac"),
         "n": n, "render_n": min(render_n, n), "n_success": n_ok, "n_slipped": n_slip,
         "elapsed_s": round(time.time() - t_start, 2), "variants": variants,
     }

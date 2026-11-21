@@ -181,11 +181,45 @@ def video_duration(p: Path) -> float:
 
 
 def sim_twin(eid: str, aligned_p: Path, task: str) -> Path | None:
+    """Digital twin = 1:1 copy of the tracked hand (sim.retarget.retarget_exact), one nominal cup variant,
+    rendered at 30 fps for the full video length. No scripted fallback: if the hand cannot be copied, no twin."""
+    import cv2
     from sim.augment import run_augment
+    from sim.retarget import HZ, retarget_exact
+    hands_p = HANDS / f"{eid}_hands.parquet"
+    video = find_video(eid)
+    if video is None or not hands_p.exists():
+        print("twin skipped: needs the video and a hands parquet for an exact copy", flush=True)
+        return None
+    cap = cv2.VideoCapture(str(video))
+    w, h = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    cap.release()
+    imu = None
+    try:
+        imu = pd.read_parquet(aligned_p) if aligned_p.exists() else None
+    except Exception:
+        imu = None
+    try:
+        rt = retarget_exact(pd.read_parquet(hands_p), w, h, video_path=str(video), imu_df=imu)
+    except Exception as e:
+        print(f"twin skipped (no exact copy): {e}", flush=True)
+        return None
+    vdur = video_duration(video)
+    if vdur > float(rt["t_s"].iloc[-1]) + 1.0 / HZ:  # hold the last pose to the end of the clip
+        attrs = dict(rt.attrs)
+        tail = np.arange(float(rt["t_s"].iloc[-1]) + 1.0 / HZ, vdur + 1e-9, 1.0 / HZ)
+        pad = pd.DataFrame([rt.iloc[-1]] * len(tail)).reset_index(drop=True)
+        pad["t_s"] = tail
+        rt = pd.concat([rt, pad], ignore_index=True)
+        rt.attrs.update(attrs)
     out = SIM / "twins" / eid
     if out.exists():
         shutil.rmtree(out)
-    run_augment(str(aligned_p), n=1, render_n=1, out_dir=str(out), lerobot_out=None, task=task, seed=7)
+    m = run_augment(str(aligned_p), n=1, render_n=1, out_dir=str(out), lerobot_out=None, task=task, seed=7,
+                    exact=rt, nominal=True)
+    v = m["variants"][0]
+    print(f"twin exact copy ({rt.attrs.get('retarget_mode')}, valid {rt.attrs.get('valid_frac', 0):.0%}): "
+          f"{'grasp OK' if v['success'] else 'no grasp'}, lift {v['max_lift_m'] * 100:.1f} cm", flush=True)
     vids = sorted((out / "videos").glob("sim_v*.mp4"))
     return vids[0] if vids else None
 

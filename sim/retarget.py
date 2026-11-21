@@ -271,6 +271,160 @@ def retarget_episode(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+EXACT_GRASP_Z = 0.090
+EXACT_MIN_Z = 0.03
+EXACT_MAX_TILT = np.deg2rad(40.0)
+
+
+def _limit_tilt(R: Rotation, max_tilt: float) -> Rotation:
+    """Swing-twist split about world Z: keep the twist (yaw), clamp the swing (tilt of the tool axis)."""
+    zt = R.apply([0.0, 0.0, 1.0])
+    zt /= np.linalg.norm(zt, axis=1, keepdims=True) + 1e-12
+    ang = np.arccos(np.clip(zt[:, 2], -1.0, 1.0))
+    axis = np.cross(np.tile([0.0, 0.0, 1.0], (len(zt), 1)), zt)
+    n = np.linalg.norm(axis, axis=1, keepdims=True)
+    axis = np.where(n > 1e-9, axis / np.maximum(n, 1e-12), [1.0, 0.0, 0.0])
+    swing = Rotation.from_rotvec(axis * ang[:, None])
+    twist = swing.inv() * R
+    return Rotation.from_rotvec(axis * np.minimum(ang, max_tilt)[:, None]) * twist
+
+
+def retarget_exact(hands_df: pd.DataFrame, width: int, height: int, video_path=None,
+                   imu_df: pd.DataFrame | None = None) -> pd.DataFrame:
+    """1:1 copy of the tracked human hand (no scripted grasp) on the video clock.
+
+    Raises ValueError if the hand is visible in < 30 % of frames or never closes.
+    """
+    from sim import hand3d
+
+    table, src = None, "default"
+    if video_path is not None:
+        try:
+            table = hand3d.calibrate_table(str(video_path))
+        except Exception as exc:  # pragma: no cover
+            print(f"[retarget] calibrate_table failed ({exc!r}); default table pose", file=sys.stderr)
+            table = None
+    K = hand3d.camera_matrix(width, height)
+    if table is None:
+        table = hand3d.default_table_pose(K)
+    src = str(table.get("source") or src) if isinstance(table, dict) else src
+    tr = hand3d.track_to_table(hands_df, width, height, table=table, K=K).reset_index(drop=True)
+    if len(tr) == 0:
+        raise ValueError("hand not visible enough for an exact copy")
+    tf = pd.to_numeric(tr["t_s"], errors="coerce").to_numpy(float)
+    tf = tf - tf[0] if np.isfinite(tf[0]) else tf
+    valid = tr["valid"].fillna(False).astype(bool).to_numpy().copy()
+    for c in ("x", "y", "z"):
+        valid &= np.isfinite(pd.to_numeric(tr[c], errors="coerce").to_numpy(float))
+    valid_frac = float(valid.mean())
+    # judge visibility within the span where the hand is in view (first..last valid frame), not the whole clip
+    iv = np.flatnonzero(valid)
+    span_frac = float(valid[iv[0]:iv[-1] + 1].mean()) if len(iv) else 0.0
+    if len(iv) < 10 or span_frac < 0.30:
+        raise ValueError(f"hand not visible enough for an exact copy (valid {valid_frac:.0%}, "
+                         f"{span_frac:.0%} within the hand span)")
+
+    def held(col, smooth=3):
+        v = pd.to_numeric(tr[col], errors="coerce").to_numpy(float).copy()
+        v[~valid] = np.nan
+        s = pd.Series(v).ffill().bfill()  # invalid stretches: hold last valid value
+        if smooth > 1:
+            s = s.rolling(smooth, center=True, min_periods=1).median()
+        return s.to_numpy(float)
+
+    T = float(np.nanmax(tf)) if len(tf) else 0.0
+    t = np.arange(0.0, T + 1e-9, 1.0 / HZ)
+    P = np.column_stack([np.interp(t, tf, held(c)) for c in ("x", "y", "z")])
+
+    ap = pd.to_numeric(tr.get("aperture_m", pd.Series(np.nan, index=tr.index)), errors="coerce").to_numpy(float)
+    ap_ok = valid & np.isfinite(ap)
+    if ap_ok.sum() < 5:
+        raise ValueError("hand not visible enough for an exact copy (no aperture)")
+    apf = ap.copy()
+    apf[~ap_ok] = np.nan
+    apf = pd.Series(apf).ffill().bfill().rolling(5, center=True, min_periods=1).median().to_numpy(float)
+    a_open = float(np.nanpercentile(ap[ap_ok], 90))
+    a_lo = float(np.nanpercentile(ap[ap_ok], 10))
+    if a_open - a_lo < 0.005:
+        raise ValueError("hand not visible enough for an exact copy (hand never closes)")
+    thr = a_lo + 0.4 * (a_open - a_lo)
+    # first closure: aperture drops below thr after having been open (above the midpoint) on a valid frame
+    was_open, ig = False, None
+    for i in range(len(apf)):
+        if apf[i] > a_lo + 0.6 * (a_open - a_lo):
+            was_open = True
+        elif was_open and apf[i] < thr and ap_ok[i]:
+            ig = i
+            break
+    if ig is None:
+        raise ValueError("hand not visible enough for an exact copy (no grip closure)")
+    t_g = float(tf[ig])
+    # closed reference = the hand's aperture while it holds the object (next ~0.5 s after closure)
+    win = (tf >= t_g) & (tf <= t_g + 0.5) & ap_ok
+    a_closed = float(np.nanmedian(ap[win])) if win.any() else float(apf[ig])
+    a_closed = min(a_closed, thr)
+    u = np.clip((np.interp(t, tf, apf) - a_closed) / max(a_open - a_closed, 1e-6), 0.0, 1.0)
+    grip = GRIP_CLOSED - u * (GRIP_CLOSED - GRIP_OPEN)
+
+    # place the cup under the hand at the first closure; shift z so the wrist sits at grasp height there
+    kg = int(np.clip(np.searchsorted(t, t_g), 0, len(t) - 1))
+    obj_xy = [float(P[kg, 0]), float(P[kg, 1])]
+    P[:, 2] = np.maximum(P[:, 2] + (EXACT_GRASP_Z - P[kg, 2]), EXACT_MIN_Z)
+
+    # orientation relative to the grasp pose (gripper points straight down at the closure), tilt <= 40 deg
+    q = tr[["qw", "qx", "qy", "qz"]].apply(pd.to_numeric, errors="coerce").to_numpy(float) \
+        if {"qw", "qx", "qy", "qz"} <= set(tr) else np.full((len(tr), 4), np.nan)
+    q_ok = valid & np.isfinite(q).all(axis=1) & (np.linalg.norm(np.nan_to_num(q), axis=1) > 0.5)
+    if q_ok.mean() >= 0.5 * max(valid_frac, 1e-6):
+        qq = q.copy()
+        qq[~q_ok] = np.nan
+        qq = pd.DataFrame(qq).ffill().bfill().to_numpy(float)
+        # hemisphere-consistent before resampling
+        for i in range(1, len(qq)):
+            if np.dot(qq[i], qq[i - 1]) < 0:
+                qq[i] = -qq[i]
+        Qr = np.column_stack([np.interp(t, tf, qq[:, k]) for k in range(4)])
+        Qr /= np.linalg.norm(Qr, axis=1, keepdims=True) + 1e-12
+        R = Rotation.from_quat(Qr[:, [1, 2, 3, 0]])
+        R = R * R[kg].inv()  # rotation since the grasp, applied to the straight-down gripper
+        rot_src = "track"
+    elif imu_df is not None and {"roll", "pitch", "yaw"} <= set(imu_df):
+        it = _episode_time(imu_df)
+        quat = _orientation(imu_df, it, t)
+        R = Rotation.from_quat(quat[:, [1, 2, 3, 0]])
+        R = R * R[kg].inv()
+        rot_src = "imu"
+    else:
+        R = Rotation.identity(len(t))
+        rot_src = "none"
+    R = _limit_tilt(R, EXACT_MAX_TILT)
+    qx = R.as_quat()
+    quat = np.column_stack([qx[:, 3], qx[:, 0], qx[:, 1], qx[:, 2]])
+
+    # shift hand path and cup together so the grasp happens at the scene centre (in view of the cameras);
+    # the motion relative to the cup is unchanged
+    P = P.copy()
+    P[:, 0] -= obj_xy[0]
+    P[:, 1] -= obj_xy[1]
+    table_xy = obj_xy
+    obj_xy = [0.0, 0.0]
+    out = pd.DataFrame({
+        "t_s": t,
+        "mocap_x": P[:, 0], "mocap_y": P[:, 1], "mocap_z": P[:, 2],
+        "mocap_qw": quat[:, 0], "mocap_qx": quat[:, 1], "mocap_qy": quat[:, 2], "mocap_qz": quat[:, 3],
+        "grip_ctrl": grip,
+    })
+    out.attrs["retarget_mode"] = f"exact_{src}"
+    out.attrs["object_xy"] = obj_xy
+    out.attrs["grasp_xy_table"] = [float(v) for v in table_xy]
+    out.attrs["valid_frac"] = valid_frac
+    out.attrs["valid_span_frac"] = span_frac
+    out.attrs["hand_span_s"] = [float(tf[iv[0]]), float(tf[iv[-1]])]
+    out.attrs["t_grasp_s"] = t_g
+    out.attrs["orientation_src"] = rot_src
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("input")
