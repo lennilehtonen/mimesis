@@ -211,6 +211,8 @@ def simulate_variant(rt: pd.DataFrame, params: dict, render: bool = False, video
         if renderer is not None:
             writer.release()
             renderer.close()
+    qo = d.qpos[obj_jadr + 3:obj_jadr + 7]  # final object quat (w x y z)
+    obj_up_z = float(1.0 - 2.0 * (qo[1] ** 2 + qo[2] ** 2))  # cos(tilt from vertical)
     video_ok = None
     if tmp_video is not None and tmp_video.exists():
         transcode_h264(tmp_video, Path(video_path))
@@ -239,8 +241,10 @@ def simulate_variant(rt: pd.DataFrame, params: dict, render: bool = False, video
     lifted = max_lift > 0.025
     mu = params["obj_friction"]
     slipped = bool((not lifted and max_force > 0.5) or (mu < 0.25 and max_lift < 0.05 and max_force > 0.5))
+    tipped = obj_up_z < 0.707  # object ended > 45 deg off upright (knocked over / dropped on its side)
     summary = {"max_lift_m": max_lift, "max_contact_force_n": max_force, "lifted": bool(lifted),
-               "slipped": slipped, "success": bool(lifted and not slipped), "duration_s": float(t[-1]),
+               "slipped": slipped, "tipped": bool(tipped), "success": bool(lifted and not slipped and not tipped),
+               "duration_s": float(t[-1]),
                "video_ok": video_ok}
     return df, summary
 

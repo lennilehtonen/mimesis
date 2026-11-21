@@ -113,6 +113,8 @@ def _mediapipe_path(df, side, t_src, t):
     y = np.clip((0.65 - wy) * 0.35 - 0.10, -0.22, 0.14)
     z = np.clip(0.24 - (wy - np.nanmin(wy)) * 0.25, 0.085, 0.24)
     d = np.hypot(col("x4") - col("x8"), col("y4") - col("y8"))
+    palm = np.hypot(col("x0") - col("x9"), col("y0") - col("y9"))  # wrist->middle MCP: scale-free pinch
+    d = d / np.where(np.isfinite(palm) & (palm > 1e-3), palm, np.nan)
     d = pd.Series(d).rolling(9, center=True, min_periods=1).mean().ffill().bfill().to_numpy()
     if np.isfinite(d).any():
         lo, hi = np.nanpercentile(d, 5), np.nanpercentile(d, 95)
@@ -142,7 +144,8 @@ def _anchor_to_object(t, pos, grip):
             j = i
             while j + 1 < n and closed[j + 1]:
                 j += 1
-            if j - i >= min_len and (best is None or j - i > best[1] - best[0]):
+            ok = t[i] >= 1.0 and t[j] - t[i] >= 1.6  # skip runs already closed at clip start
+            if ok and j - i >= min_len and (best is None or j - i > best[1] - best[0]):
                 best = (i, j)
             i = j + 1
         else:
@@ -156,7 +159,7 @@ def _anchor_to_object(t, pos, grip):
     pos = pos - pos[best[0]] + np.array([0.0, 0.0, zg])
     # hold xy during the close
     hold = (t >= tg - 0.15) & (t <= tg + 0.5)
-    w_in = np.clip((t - (tg - 0.6)) / 0.45, 0, 1)
+    w_in = np.clip((t - (tg - 1.2)) / 0.45, 0, 1)  # xy centred on the object before the descent starts
     w_out = np.clip(((tg + 1.0) - t) / 0.5, 0, 1)
     w = np.minimum(w_in, w_out)
     w = 0.5 - 0.5 * np.cos(np.pi * w)
@@ -166,6 +169,14 @@ def _anchor_to_object(t, pos, grip):
                         (tg + 1.3, [zl]), (tr - 0.85, [zl]), (tr, [zg + 0.002]), (tr + 0.4, [zg + 0.002]),
                         (tr + 1.1, [0.18])])[:, 0]
     closed_win = (t >= tg - 0.15) & (t <= tr + 0.4)
+    # while the object is held, follow only slow (~1 s) camera xy drift and freeze xy for the set-down, so hand
+    # jitter / fast lateral swings don't swing the object out of the jaw or knock it over on release
+    win = max(1, int(round(1.0 / dt)))
+    sm = pd.DataFrame(pos[:, :2]).rolling(win, center=True, min_periods=1).mean().to_numpy()
+    pos[closed_win, :2] = sm[closed_win]
+    rel = t >= tr - 0.6  # set down, release and retract straight up (no sweep back into the placed object)
+    if rel.any():
+        pos[rel, :2] = pos[np.argmax(rel), :2]
     pos[:, 2] = np.where(closed_win, zf, np.maximum(pos[:, 2], zf))
     pos[:, 2] = np.clip(pos[:, 2], 0.085, 0.26)
     O, C = GRIP_OPEN, GRIP_CLOSED
