@@ -91,7 +91,7 @@ def to_table(det: pd.DataFrame, table: dict) -> pd.DataFrame:
             continue
         p = C + s * r
         xs[i], ys[i] = p[0], p[1]
-    out = det[["t_s", "score"]].copy()
+    out = det[["t_s", "score", "h_px"]].copy()
     out["cup_x"], out["cup_y"] = xs, ys
     # light smoothing over detected frames; short gaps (<0.4 s) interpolated
     for c in ("cup_x", "cup_y"):

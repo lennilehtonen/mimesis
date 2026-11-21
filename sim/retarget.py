@@ -379,7 +379,20 @@ def retarget_exact(hands_df: pd.DataFrame, width: int, height: int, video_path=N
     u = np.where(u < 0.5, 0.0, (u - 0.5) * 2.0)
     u = pd.Series(u).rolling(15, center=True, min_periods=1).mean().to_numpy()
     # firm grip: when the human hand is closed (lower half of its opening range) the hand closes fully
-    u = np.where(u < 0.5, 0.0, (u - 0.5) * 2.0)
+    closed = u < 0.5
+    # debounce: openings shorter than 0.4 s inside a hold are tracking flicker, not a release
+    i0 = 0
+    while i0 < len(closed):
+        if not closed[i0]:
+            i1 = i0
+            while i1 + 1 < len(closed) and not closed[i1 + 1]:
+                i1 += 1
+            if i0 > 0 and i1 < len(closed) - 1 and (i1 - i0 + 1) / HZ < 0.4:
+                closed[i0:i1 + 1] = True
+            i0 = i1 + 1
+        else:
+            i0 += 1
+    u = np.where(closed, 0.0, np.maximum((u - 0.5) * 2.0, 0.3))
     u = pd.Series(u).rolling(15, center=True, min_periods=1).mean().to_numpy()
     grip = GRIP_CLOSED - u * (GRIP_CLOSED - GRIP_OPEN)
 
@@ -473,12 +486,23 @@ def retarget_exact(hands_df: pd.DataFrame, width: int, height: int, video_path=N
                 out["cup_x"], out["cup_y"] = np.where(seen, cx, np.nan), np.where(seen, cy, np.nan)
                 # hand lost while holding: move the hand with the tracked cup (keep the grip offset)
                 mx, my = out["mocap_x"].to_numpy(float).copy(), out["mocap_y"].to_numpy(float).copy()
+                mz = out["mocap_z"].to_numpy(float).copy()
+                # lift while the hand is lost: the cup looks bigger the closer it gets to the camera
+                hp = ct["h_px"].to_numpy(float)
+                h_t = np.interp(t, ctt[ok], hp[ok])
+                h0 = float(np.nanmedian(hp[ok]))  # cup standing on the table most of the take
                 for k0, k1 in held_gaps:
                     off = (mx[k0 - 1] - cx[k0 - 1], my[k0 - 1] - cy[k0 - 1])
+                    z0 = mz[k0 - 1]
                     for j in range(k0, k1 + 1):
                         if seen[j]:
                             mx[j], my[j] = cx[j] + off[0], cy[j] + off[1]
-                out["mocap_x"], out["mocap_y"] = mx, my
+                            mz[j] = z0 + float(np.clip((h_t[j] / h0 - 1.0) * 0.35, 0.0, 0.15))
+                    # cup ray hits the table behind a lifted cup: keep x/y near the grip, smooth the path
+                    seg = slice(max(0, k0 - 10), min(len(t), k1 + 10))
+                    for arr in (mx, my, mz):
+                        arr[seg] = pd.Series(arr[seg]).rolling(25, center=True, min_periods=1).mean().to_numpy()
+                out["mocap_x"], out["mocap_y"], out["mocap_z"] = mx, my, mz
                 first = int(np.flatnonzero(seen)[0]) if seen.any() else 0
                 obj_xy = [float(cx[first]), float(cy[first])]
                 out.attrs["cup_seen_frac"] = float(ok.mean())

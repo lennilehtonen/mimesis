@@ -219,7 +219,7 @@ def simulate_variant(rt: pd.DataFrame, params: dict, render: bool = False, video
                 att.update(on=True, ever=True, rel_p=np.array([0.0, 0.0, -0.075]), rel_q=qinv.copy(),
                            yaw_q=None)
         if att["on"]:
-            if m_obj * (G + att["acc"]) > 2.0 * mu_obj * F_GRIP:  # grip cannot carry it -> slip out
+            if not params.get("no_slip") and m_obj * (G + att["acc"]) > 2.0 * mu_obj * F_GRIP:  # slip out
                 att.update(on=False, dropped=True, blocked=True)
                 return
             Rw = np.zeros(9); mujoco.mju_quat2Mat(Rw, wq); Rw = Rw.reshape(3, 3)
@@ -346,7 +346,7 @@ def _call_export(lerobot_out, variants, task, out_dir):
 
 def nominal_params(i: int = 0) -> dict:
     """Nominal object: cup, 0.25 kg, mu 0.8, scale 1, no offset, no time warp."""
-    return {"variant_idx": i, "obj_type": "cup", "obj_friction": 0.8, "obj_mass_kg": 0.25, "obj_scale": 1.0,
+    return {"no_slip": True, "variant_idx": i, "obj_type": "cup", "obj_friction": 0.8, "obj_mass_kg": 0.25, "obj_scale": 1.0,
             "obj_xy": [0.0, 0.0], "time_warp": 1.0, "rgba": list(PALETTE[0]), "hard": False, "noise_seed": 7}
 
 
