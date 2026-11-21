@@ -140,8 +140,10 @@ def process(eid: str) -> dict:
         vdur = float(t_imu[-1])
     tv = np.arange(0, vdur, 0.01)
     imu = np.interp(tv + offset, t_imu, amag, left=0, right=0)
+    tc = sync.get("t_clap_imu_s")  # the 3 sync claps are not task contacts
+    clap = (lambda t: tc - 0.3 <= t <= tc + 2.6) if tc is not None and not sync.get("imu_only") else (lambda t: False)
     contacts = [{"kind": UI_KIND.get(e["event"], "TAP"), "t": round(e["t_s"] - offset, 3), "event": e["event"]}
-                for e in events if 0 <= e["t_s"] - offset <= vdur]
+                for e in events if 0 <= e["t_s"] - offset <= vdur and not clap(e["t_s"])]
     gripper, state, t_last = [], "open", 0.0
     for c in contacts:
         new = "closed" if c["event"] == "grab_onset" else "open" if c["event"] in ("set_down", "slip_or_scrape") else state
@@ -283,7 +285,8 @@ def metrics() -> dict:
         print("extra bars failed:", e, flush=True)
     m = {"acc": round(100 * bal) if bal is not None else 0, "auc": round(auc, 2) if auc is not None else 0,
          "acc_metric": "balanced_accuracy", "bars": bars, "n_real": len(reals),
-         "n_sim": rep.get("n_sim_episodes"), "synthetic": False}
+         "n_sim": rep.get("n_sim_episodes"),
+         "synthetic": all("synth" in Path(r).stem for r in reals)}
     m.update(drift_data(reals))
     (PUB / "metrics.json").write_text(json.dumps(m, indent=2))
     publish_index()
@@ -296,10 +299,16 @@ def extra_bars(reals: list[str]) -> dict:
     import sim.sim_to_real as s2r
     from sklearn.ensemble import RandomForestClassifier
     from sklearn.metrics import balanced_accuracy_score
-    if len(reals) < 2 or not hasattr(s2r, "episode_windows"):
+    if len(reals) < 2:
         return {"real": 0, "simreal": 0}
-    real = [s2r.episode_windows(p, sim=False) for p in reals]
-    sims = [s2r.episode_windows(str(p), sim=True) for p in sorted((SIM / "episodes").glob("sim_v*.parquet"))
+
+    def windows(p, sim):
+        df = s2r.to_100hz(s2r.read_any(p))
+        X, st = s2r.window_features(df)
+        flag = s2r.sim_sample_labels(df) if sim else s2r.real_sample_labels(df)
+        return X, s2r.window_labels(flag, st)
+    real = [windows(p, False) for p in reals]
+    sims = [windows(str(p), True) for p in sorted((SIM / "episodes").glob("sim_v*.parquet"))
             if not p.stem.endswith("_30fps")]
     Xs = np.vstack([x for x, _ in sims]) if sims else np.zeros((0, real[0][0].shape[1]))
     ys = np.concatenate([y for _, y in sims]) if sims else np.zeros(0)
