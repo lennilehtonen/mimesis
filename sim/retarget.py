@@ -352,13 +352,21 @@ def retarget_exact(hands_df: pd.DataFrame, width: int, height: int, video_path=N
         raise ValueError("hand not visible enough for an exact copy (hand never closes)")
     thr = a_lo + 0.4 * (a_open - a_lo)
     # first closure: aperture drops below thr after having been open (above the midpoint) on a valid frame
-    was_open, ig = False, None
+    # all closures; the real pick-up is the closure after which the hand rises the most (the lift)
+    was_open, closures = False, []
     for i in range(len(apf)):
         if apf[i] > a_lo + 0.6 * (a_open - a_lo):
             was_open = True
         elif was_open and apf[i] < thr and ap_ok[i]:
-            ig = i
-            break
+            closures.append(i)
+            was_open = False
+    zz = held(pc[2])
+    ig, best = None, -1e9
+    for i in closures:
+        win3 = (tf >= tf[i]) & (tf <= tf[i] + 3.0) & valid
+        rise = float(np.nanmax(zz[win3]) - zz[i]) if win3.any() else 0.0
+        if rise > best:
+            ig, best = i, rise
     if ig is None:
         raise ValueError("hand not visible enough for an exact copy (no grip closure)")
     t_g = float(tf[ig])
@@ -380,6 +388,22 @@ def retarget_exact(hands_df: pd.DataFrame, width: int, height: int, video_path=N
     obj_xy = [float(P[kg, 0]), float(P[kg, 1])]
     P[:, 2] = np.maximum(P[:, 2] + (EXACT_GRASP_Z - P[kg, 2]), EXACT_MIN_Z)
     park_z = 0.25
+    # hand out of view inside the take (gap > 0.5 s): open and lift away, like the real hand leaving
+    vt = np.interp(t, tf, valid.astype(float)) > 0.5
+    k = 0
+    while k < len(t):
+        if not vt[k]:
+            e = k
+            while e + 1 < len(t) and not vt[e + 1]:
+                e += 1
+            if (e - k + 1) / HZ > 0.5 and k > 0 and e < len(t) - 1:
+                for j in range(k, e + 1):
+                    w = min(1.0, min(j - k, e - j) / (0.4 * HZ))
+                    P[j, 2] = (1 - w) * P[j, 2] + w * park_z
+                    grip[j] = (1 - w) * grip[j] + w * GRIP_OPEN
+            k = e + 1
+        else:
+            k += 1
     for k in range(len(t)):
         d = max(t_in - t[k], t[k] - t_out, 0.0)
         if d > 0:  # blend over 0.5 s from the first/last seen pose up to the parking height

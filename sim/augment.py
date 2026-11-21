@@ -162,6 +162,54 @@ def simulate_variant(rt: pd.DataFrame, params: dict, render: bool = False, video
         writer = cv2.VideoWriter(str(tmp_video), cv2.VideoWriter_fourcc(*"mp4v"), RENDER_FPS, (RENDER_W, RENDER_H))
     next_frame_t = 0.0
 
+    # exact mode: while the human hand is closed around the cup, the cup moves with the hand (attached);
+    # it drops (SLIP) when the grip cannot carry it: m * (g + |a_hand|) > 2 * mu * F_GRIP
+    obj_dof = m.jnt_dofadr[m.body_jntadr[obj_bid]]
+    m_obj, mu_obj = float(params["obj_mass_kg"]), float(params["obj_friction"])
+    F_GRIP = 9.0
+    GC = rt["grip_ctrl"].to_numpy(float)
+    # hand acceleration from the smoothed copied path (not from 500 Hz finite differences)
+    Ps = pd.DataFrame(P).rolling(25, center=True, min_periods=1).mean().to_numpy()
+    dt_r = float(np.median(np.diff(t_traj))) if len(t_traj) > 1 else 0.01
+    A_hand = np.linalg.norm(np.gradient(np.gradient(Ps, dt_r, axis=0), dt_r, axis=0), axis=1)
+    A_hand = pd.Series(A_hand).rolling(25, center=True, min_periods=1).mean().to_numpy()
+    att = {"on": False, "rel_p": None, "rel_q": None, "ever": False, "dropped": False, "blocked": False,
+           "prev_p": None, "prev_v": np.zeros(3), "acc": 0.0}
+
+    def hold_update(tt):
+        if not exact:
+            return
+        closed = (np.interp(tt, t_traj, GC) - GRIP_OPEN) / (GRIP_CLOSED - GRIP_OPEN) > 0.6
+        wp, wq = d.xpos[wrist_bid].copy(), d.xquat[wrist_bid].copy()
+        v = (wp - att["prev_p"]) / PHYS_DT if att["prev_p"] is not None else np.zeros(3)
+        att["acc"] = float(np.interp(tt, t_traj, A_hand))
+        att["prev_p"], att["prev_v"] = wp, v
+        op = d.qpos[obj_jadr:obj_jadr + 3]
+        if not closed:
+            att["blocked"] = False
+            if att["on"]:  # human let go: the cup is set down upright where the hand released it
+                att["on"] = False
+                if d.qpos[obj_jadr + 2] - obj_z0 < 0.10:
+                    d.qpos[obj_jadr + 2] = obj_z0
+                    d.qpos[obj_jadr + 3:obj_jadr + 7] = [1.0, 0.0, 0.0, 0.0]
+                    d.qvel[obj_dof:obj_dof + 6] = 0.0
+            return
+        if not att["on"] and not att["blocked"]:
+            if np.hypot(*(op[:2] - wp[:2])) < 0.10 and -0.02 < wp[2] - op[2] < 0.16:
+                # snap the object upright into the grip: centred between thumb and fingers, under the palm
+                qinv = np.zeros(4); mujoco.mju_negQuat(qinv, wq)
+                att.update(on=True, ever=True, rel_p=np.array([0.0, 0.0, -0.075]), rel_q=qinv.copy(),
+                           yaw_q=None)
+        if att["on"]:
+            if m_obj * (G + att["acc"]) > 2.0 * mu_obj * F_GRIP:  # grip cannot carry it -> slip out
+                att.update(on=False, dropped=True, blocked=True)
+                return
+            Rw = np.zeros(9); mujoco.mju_quat2Mat(Rw, wq); Rw = Rw.reshape(3, 3)
+            d.qpos[obj_jadr:obj_jadr + 3] = wp + Rw @ att["rel_p"]
+            d.qpos[obj_jadr + 3:obj_jadr + 7] = [1.0, 0.0, 0.0, 0.0]  # stays upright like a held cup
+            d.qvel[obj_dof:obj_dof + 3] = v
+            d.qvel[obj_dof + 3:obj_dof + 6] = 0.0
+
     n_samples = int(np.floor(T * 100.0)) + 1
     rows = np.zeros((n_samples, 23))
     cf = np.zeros(6)
@@ -175,6 +223,7 @@ def simulate_variant(rt: pd.DataFrame, params: dict, render: bool = False, video
                 d.mocap_pos[mocap_id], d.mocap_quat[mocap_id] = p, q
                 d.ctrl[:] = g
                 mujoco.mj_step(m, d)
+                hold_update(tt)
                 step += 1
                 if renderer is not None and d.time >= next_frame_t - 1e-9:
                     renderer.update_scene(d, camera="side_cam")
@@ -249,6 +298,9 @@ def simulate_variant(rt: pd.DataFrame, params: dict, render: bool = False, video
     mu = params["obj_friction"]
     slipped = bool((not lifted and max_force > 0.5) or (mu < 0.25 and max_lift < 0.05 and max_force > 0.5))
     tipped = obj_up_z < 0.707  # object ended > 45 deg off upright (knocked over / dropped on its side)
+    if exact and att["ever"]:  # carried by the copied hand: physics of the grip decides
+        slipped = bool(att["dropped"])
+        tipped = False if not slipped else tipped
     summary = {"max_lift_m": max_lift, "max_contact_force_n": max_force, "lifted": bool(lifted),
                "slipped": slipped, "tipped": bool(tipped), "success": bool(lifted and not slipped and not tipped),
                "duration_s": float(t[-1]),

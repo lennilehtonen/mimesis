@@ -2,9 +2,9 @@
 
 **μίμησις** *(mímēsis)* — Ancient Greek for *imitation*: the representation of the real world in another medium.
 
-> **Record one real demo with your phones. Simulate a thousand.**
+> **Film one real grab with your phone. Simulate a thousand.**
 
-MIMESIS is a zero-hardware **real-to-sim physical-AI data multiplier**. Two ordinary iPhones capture a short egocentric manipulation demo (chest video + 100 Hz wrist IMU). A Mac retargets that demonstration into MuJoCo, multiplies it across physically varied worlds (mass, friction, size, timing, sensor noise), and exports a LeRobot-style dataset of simulated wrist IMUs, contact forces, slip/drop labels, and rendered RGB. A small classifier trained **only on simulated IMU windows** is then evaluated zero-shot on the **real** phone IMU — the sim-to-real check that makes the pipeline more than a renderer.
+MIMESIS turns one short phone video of a human hand picking up a cup into a physics-labelled robot dataset. One iPhone films the table from above (Continuity Camera into Chrome). No wrist IMU and no other sensors. A Mac tracks the hand with MediaPipe, lifts it to a metric 3D hand using an A4 sheet on the table as calibration, and makes a robot hand in MuJoCo copy the human hand 1:1 in time. It then replays that motion across many physically varied worlds (mass, friction, size, position) and labels each variant OK or SLIP from the physics. The result is exported as a LeRobot v3 dataset.
 
 Built at [NullHacks Helsinki](docs/PITCH.md) (21 November 2026). Theme: *“Everyone is working on physical AI… find an awesome way to **simulate** any data you find cool. End result could be a dataset, a model, a simulation that could be deployed to collect this data, whatever.”* Judged on coolness, technical complexity, and creativity.
 
@@ -24,60 +24,62 @@ MIMESIS does not claim that IMU-only XYZ is solved. The opposite is the point: *
 
 ```mermaid
 flowchart LR
-  subgraph Capture["1. Capture (two iPhones)"]
-    PA["Phone A<br/>chest / head camera<br/>1080p 30 fps + audio"]
-    PB["Phone B<br/>Sensor Logger<br/>100 Hz IMU HTTP Push"]
+  subgraph Capture["1. Capture (one iPhone)"]
+    CAM["iPhone camera<br/>Continuity Camera into Chrome<br/>dashboard Record tab"]
+    A4["A4 sheet on the table<br/>first 3 s = table calibration"]
   end
 
-  subgraph Mac["2. Mac receiver and labels"]
-    RCV["receiver.py<br/>POST /data"]
+  subgraph Vision["2. Hand in 3D"]
     HND["hands.py<br/>MediaPipe 21 landmarks"]
-    SYN["sync.py<br/>3-clap audio ↔ IMU jerk"]
-    CD["contact_detect.py<br/>jerk / slip events"]
+    H3D["sim/hand3d.py<br/>metric 3D hand per frame<br/>solvePnP + A4 table frame (IPPE)"]
   end
 
-  subgraph Sim["3. MIMESIS multiplier"]
-    RT["sim/retarget.py<br/>100 Hz mocap + grip"]
-    AUG["sim/augment.py<br/>N MuJoCo variants"]
-    S2R["sim/sim_to_real.py<br/>train on sim, test on real"]
+  subgraph Sim["3. Robot twin and multiplier"]
+    RT["sim/retarget.py<br/>retarget_exact: 1:1 copy in time"]
+    AUG["sim/augment.py<br/>MuJoCo hand, N variants"]
+    LBL["GRAB / RELEASE from video<br/>OK / SLIP from physics"]
   end
 
-  subgraph Out["4. Deliverables"]
+  subgraph Out["4. Output"]
     LR["export.py<br/>LeRobot v3 folder"]
-    DEMO["sim/demo_grid.py<br/>real | twin | 3×3 grid"]
   end
 
-  PA --> HND
-  PA --> SYN
-  PB --> RCV
-  RCV --> CD
-  RCV --> SYN
-  HND --> SYN
-  SYN --> RT
-  CD --> S2R
+  CAM --> HND
+  A4 --> H3D
+  HND --> H3D
+  H3D --> RT
   RT --> AUG
-  AUG --> S2R
+  HND --> LBL
+  AUG --> LBL
+  LBL --> LR
   AUG --> LR
-  SYN --> LR
-  AUG --> DEMO
 ```
 
-Full data-flow, timestamp conventions, clap-sync math, and coordinate frames: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Step by step:
+
+1. **Record.** The dashboard Record tab records the phone camera in Chrome. An A4 sheet lies on the table; the first 3 s are used to find it.
+2. **2D hand.** `hands.py` runs MediaPipe Hands and writes 21 landmarks per frame.
+3. **3D hand.** `sim/hand3d.py` builds a metric 3D hand for each frame. It solves the pose of the MediaPipe world landmarks against the image landmarks with `solvePnP`, using iPhone intrinsics (about 69° horizontal field of view). The A4 sheet is detected and solved with IPPE to give the table frame. If no sheet is found, an assumed chest-camera pose is used.
+4. **Retarget.** `sim/retarget.py` (`retarget_exact`) makes the robot hand copy the human hand 1:1 in time. The grip centre is the midpoint of the thumb tip and the middle fingertip. Finger opening drives hand open/close. The hand stays vertical, with yaw taken from the human hand. When the hand is out of view the robot hand parks above the table. There is no scripted motion.
+5. **Simulate.** `sim/augment.py` runs MuJoCo with a hand-shaped end effector (palm, thumb, 4 fingers). While the human hand is closed around the cup, the cup is carried by the robot hand. It slips out when `m * (g + |a_hand|) > 2 * mu * F_grip`. Variants randomise mass, friction, size and position.
+6. **Label and export.** GRAB / RELEASE events come from finger opening in the video. OK / SLIP labels come from the physics. Everything is exported in LeRobot v3 format.
+
+`process_video_only` and `multiply_video` in `jobs.py` run this pipeline. Older docs on data flow and coordinate frames: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ---
 
 ## Features
 
-- **No native iOS code.** Phone B streams with the free **Sensor Logger** app (Kelvin Choi). Phone A is the built-in Camera app. The Mac is the only software you write and run.
-- **100 Hz wrist IMU ingest** via FastAPI (`POST /data`), with an offline CSV import fallback when venue Wi-Fi isolates devices.
-- **MediaPipe Hands** (Tasks API `HandLandmarker`, with a legacy `mp.solutions.hands` fallback) over a video file or a live Continuity Camera feed.
-- **Clap-sync** of video audio against IMU jerk, typically to about **10 ms** on the synthetic test clip.
-- **Contact event detection** (`idle`, `motion`, `grab_onset`, `impact_or_tap`, `set_down`, `slip_or_scrape`) from jerk, high-pass vibration, and rest/motion context.
-- **MuJoCo retargeting** of the real wrist into a mocap-welded dynamic two-finger gripper (Apple Silicon–safe; EGL only on headless Linux).
-- **Domain-randomized data multiplier**: cup/box, mass, friction, scale, XY offset, time-warp, MEMS bias/noise; privileged `success` / `slipped` labels from physics, not from a human annotator.
-- **Zero-shot sim-to-real check**: `RandomForestClassifier` trained only on simulated 200 ms IMU windows, evaluated on real `contact_detect.py` labels.
-- **LeRobot v3-style export** (parquet + mp4 + `meta/info.json`) for both real aligned episodes and simulated variants.
-- **Stage demo asset**: side-by-side *real clip | MuJoCo twin | 3×3 augmented grid* with success/slip tags.
+- **One phone, no wearables.** The iPhone is the camera, streamed to Chrome with Continuity Camera. No app to install on the phone and no wrist sensor.
+- **Recording in the browser.** The dashboard Record tab records the video and uploads it on stop. Processing starts automatically.
+- **Metric 3D hand from monocular video.** MediaPipe landmarks plus `solvePnP` with iPhone intrinsics, anchored to the table through an A4 sheet (IPPE).
+- **1:1 retargeting.** The robot hand follows the human hand in time: grip centre, opening/closing and yaw. No scripted pick-and-place.
+- **Hand-shaped MuJoCo end effector** (palm, thumb, 4 fingers) that carries the cup while the human hand is closed around it.
+- **Grip-force slip model.** The cup slips when `m * (g + |a_hand|) > 2 * mu * F_grip`, so fast moves and heavy or slippery cups fail.
+- **Domain-randomised variants** of mass, friction, size and position, each labelled OK or SLIP by the physics, not by a human annotator.
+- **GRAB / RELEASE events** from finger opening in the real video.
+- **LeRobot v3-style export** (parquet + mp4 + `meta/info.json`).
+- **Dashboard** with Record, Episode (real video with skeleton next to the MuJoCo twin, same timing), Multiply (N variants, OK vs SLIP) and Ship (export).
 
 ---
 
@@ -85,22 +87,24 @@ Full data-flow, timestamp conventions, clap-sync math, and coordinate frames: [d
 
 | Role | Device | App / setting |
 |---|---|---|
-| Phone A — egocentric RGB + audio | Any iPhone with a rear camera (Ultra-Wide helps) | Built-in **Camera**: Video, **1080p at 30 fps**, **0.5× Ultra-Wide**, **Audio ON**. Mount on a chest lanyard / hoodie pocket / cap, angled ~35° down at the tabletop so both hands stay in frame. |
-| Phone B — wrist IMU | iPhone strapped flat to the back of the dominant wrist or forearm | **Sensor Logger** by Kelvin Choi (App Store, free tier is enough). |
-| Receiver / sim / export | MacBook (Apple Silicon or Intel), Python 3.11 or 3.12, `ffmpeg` | This repository. |
+| Camera | Any recent iPhone | Continuity Camera into Chrome on the Mac. Nothing to install on the phone. |
+| Stand | Phone stand or tripod | About 50 cm above the table, pointing down at about 45°. It must not move during a take. |
+| Calibration | One A4 sheet of paper | Flat on a darker table, fully in view. |
+| Object | A cup | Next to the sheet. |
+| Processing | MacBook (Apple Silicon or Intel), Python 3.11 or 3.12, `ffmpeg`, Chrome | This repository. |
 
-**Sensor Logger (Phone B) — exact settings used by `receiver.py`:**
+---
 
-1. **Settings → Sensor Configuration:** turn **Standardise Units & Frames = ON** (right-handed frames, acceleration in m/s²). Leave **Uncalibrated Values = OFF**.
-2. On the **Logger** tab, enable **only** these four sensors, each at **100 Hz** (or period `0.01 s`):
-   - **Accelerometer** (calibrated linear acceleration, gravity removed)
-   - **Gyroscope** (rad/s)
-   - **Orientation** (`qx, qy, qz, qw, roll, pitch, yaw`)
-   - **Gravity** (`x, y, z`)
-3. Logger gear → **HTTP Push = ON**, URL = `http://<MAC_IP>:8000/data` (printed by `python receiver.py`).
-   The free tier batches pushes roughly once per second, but **every 100 Hz sample is included in the `payload` array with a UTC epoch-nanosecond timestamp.** Local on-phone recording is also written and can be AirDropped as a CSV zip if HTTP never arrives.
+## How to film a take
 
-Capture protocol, the 18-task list, and Wi-Fi / hotspot troubleshooting: [docs/DATA_COLLECTION.md](docs/DATA_COLLECTION.md).
+1. Put the phone on a stand about 50 cm above the table, pointing down at about 45°. It must not move during the take.
+2. Lay an A4 sheet flat on a darker table. The whole sheet must be in view, with some margin around it.
+3. Put the cup next to the sheet.
+4. Press **RECORD** in the dashboard Record tab. Wait 3 s with no hand in view (table calibration).
+5. With your right hand only: come in, grab the cup from above, lift it about 10 cm, move it, put it down, open your hand and pull out.
+6. Press stop.
+
+Keep the whole hand in view the entire time. Use one hand only.
 
 ---
 
@@ -111,27 +115,29 @@ Capture protocol, the 18-task list, and Wi-Fi / hotspot troubleshooting: [docs/D
 ./run.sh
 ```
 
-`run.sh` creates `.venv` and installs `requirements.txt` on first run, prints the **Sensor Logger HTTP Push URL** for the iPhone USB / Personal Hotspot network (`172.20.10.x`), starts the receiver on port 8000 and opens the dashboard at `http://localhost:8000/`.
+`run.sh` creates `.venv` and installs `requirements.txt` on first run, starts the server on port 8000 and opens the dashboard at `http://localhost:8000/`. Open it in Chrome and pick the iPhone (Continuity Camera) as the camera.
 
-**Dashboard** (keys `1`–`4` switch tabs; add `?demo` to the URL for synthetic data without phones):
+**Dashboard** (keys `1`–`4` switch tabs):
 
 | Tab | What it does |
 |---|---|
-| 1 Record | Chest cam via Continuity Camera (`getUserMedia`) with a MediaPipe Tasks JS hand skeleton in the browser, live 100 Hz wrist IMU over WebSocket `/ws`, GRAB / TAP / SLIP / SET-DOWN chips. RECORD calls `/episode/start`, records the camera + audio in the browser and uploads it on stop; processing (hands, clap-sync, contacts, MuJoCo twin) starts automatically. |
-| 2 Episode | Real overlay MP4 and MuJoCo twin in sync, IMU timeline, contact chips. |
-| 3 Multiply | Slider 10–1,000 + Generate: `sim.augment` in a subprocess with live progress, 3×3 grid of rendered variants (OK / SLIP), OK vs SLIP donut. |
-| 4 Ship | Sim-to-real metric card, baselines, IMU drift vs camera plot, dataset card, Export to LeRobot v3. |
+| 1 Record | Live phone camera with a hand skeleton. RECORD records the video in the browser and uploads it on stop; processing (hands, 3D hand, retarget, MuJoCo twin) starts automatically. |
+| 2 Episode | The real video with the hand skeleton next to the MuJoCo twin, with the same timing. GRAB / RELEASE events. |
+| 3 Multiply | Generate N physics variants, see which ones are OK and which SLIP. |
+| 4 Ship | Export to LeRobot v3. |
 
-Setup helpers: `scripts/find_mac_ip.sh` prints the Mac IP on the iPhone USB network and the exact Sensor Logger URL (it changes when the tether reconnects). If HTTP push is blocked, record locally in Sensor Logger and use `python receiver.py --import-csv-dir <folder>`.
+Without the UI (for an episode with video and no IMU file, `process` runs `process_video_only` and `multiply` runs `multiply_video`):
 
 ```bash
-# End-to-end synthetic verification (~20–60 s). No phones required.
-.venv/bin/python test_pipeline.py      # prints ALL 10 CHECKS PASSED
+python jobs.py process <episode>
+python jobs.py multiply <episode> --n 300
+python jobs.py export
 ```
 
-`test_pipeline.py` exercises HTTP ingest + WebSocket, contact detection, hands, clap-sync, MuJoCo variants (9 rendered), sim and real LeRobot export, sim-to-real and `demo_grid.py`.
-
-Pipeline jobs can also be run without the UI: `python jobs.py process <episode>`, `process_all`, `multiply <episode> --n 300`, `metrics`, `export`.
+```bash
+# End-to-end synthetic verification. No phones required.
+.venv/bin/python test_pipeline.py
+```
 
 ---
 
@@ -354,7 +360,7 @@ Per-frame features in `data/chunk-000/file-000.parquet`:
 
 ## Results
 
-Measured at NullHacks Helsinki on 21 Nov 2026: 10 real wrist-IMU takes of "pick up cup" (Sensor Logger, 100 Hz over USB tethering, 1,447 s total), multiplied into 300 MuJoCo variants from one take (`ep_155834`).
+Measured at NullHacks Helsinki on 21 Nov 2026: 10 real wrist-IMU takes of "pick up cup" (Sensor Logger, 100 Hz over USB tethering, 1,447 s total), multiplied into 300 MuJoCo variants from one take (`ep_155834`). These IMU numbers come from the earlier wrist-IMU prototype (10 takes); the current pipeline is video-only and uses no IMU.
 
 | Metric | Real phone data | Synthetic regression test (`test_pipeline.py`) |
 |---|---|---|
@@ -383,13 +389,10 @@ A wrist accelerometer measures **specific force**. To get position you subtract 
 
 ## Limitations (honest)
 
-- **Monocular MediaPipe “world” landmarks are not metric mocap.** They live in a hand-centered frame; absolute depth is weak. Retargeting uses them as a coarse tabletop mapping, or falls back to a contact-locked kinematic script when landmarks are missing.
-- **The wrist phone is bulky** compared with a watch, ring, or dedicated IMU. Mount rigidity and soft tape affect high-frequency content.
-- **Simulation is a pinch gripper, not a human hand.** Contacts, friction cones, and slip labels are physically consistent *inside the engine*, not a digital twin of skin or a GelSight.
-- **Sim-to-real numbers on synthetic IMU are not the same as numbers on a real mug.** Report them separately. The classifier is a 16-feature random forest on 200 ms windows, not a foundation model.
-- **Free-tier Sensor Logger HTTP Push is batched (~1 s)**, not a 10 ms HTTP request per sample. Timestamps inside the batch are still 100 Hz. Venue networks may block phone→Mac HTTP entirely — use a hotspot or the CSV import path.
-- **Contact labels are rule-based.** GRAB / SET-DOWN are movement-burst edges with thresholds adapted to each recording's noise floor; TAP is an impulsive spike; SLIP is sustained vibration. They are a proxy for touch, not ground-truth tactile data.
-- **Clap-sync needs the 3 claps** at the start of every take; without them the offset is meaningless. Takes without chest video are processed IMU-only.
+- **Monocular depth is approximate.** The 3D hand comes from one camera; expect about ±2-5 cm depth error.
+- **Needs the A4 sheet and a fixed camera.** Without the sheet the table frame falls back to an assumed chest-camera pose. If the phone moves during a take, the table calibration is wrong.
+- **The robot hand is a simplified hand.** It models thumb against fingers (palm, thumb, 4 fingers), not every human finger joint.
+- **Carried-object slip uses a grip-force model**, not finger contact physics. The cup is carried while the hand is closed and slips out when `m * (g + |a_hand|) > 2 * mu * F_grip`.
 - **Rendered sim video is 320×240** from `side_cam` at ~30 fps; `info.json` still declares egocentric video as `[1080, 1920, 3]`. Treat that shape as a schema hint, not a guaranteed resolution.
 - MuJoCo offscreen rendering must stay on the **main thread** on macOS. Do not start a second `Renderer` from a background worker.
 
