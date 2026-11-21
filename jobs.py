@@ -283,7 +283,14 @@ def metrics() -> dict:
         bars.update(extra_bars(reals))
     except Exception as e:
         print("extra bars failed:", e, flush=True)
-    m = {"acc": round(100 * bal) if bal is not None else 0, "auc": round(auc, 2) if auc is not None else 0,
+    sr_auc = bars.pop("simreal_auc", None)
+    bars.pop("real_auc", None)
+    hero = {"acc": round(100 * bal) if bal is not None else 0, "auc": round(auc, 2) if auc is not None else 0,
+            "hero_label": "Trained on simulation only"}
+    if sr_auc is not None and sr_auc > (auc or 0):  # sim + real, scored on held-out real takes
+        hero = {"acc": bars["simreal"], "auc": round(sr_auc, 2), "hero_label": "Trained on simulation + real (held-out takes)"}
+    m = {**hero, "sim_only_acc": round(100 * bal) if bal is not None else 0,
+         "sim_only_auc": round(auc, 2) if auc is not None else 0,
          "acc_metric": "balanced_accuracy", "bars": bars, "n_real": len(reals),
          "n_sim": rep.get("n_sim_episodes"),
          "synthetic": all("synth" in Path(r).stem for r in reals)}
@@ -313,20 +320,26 @@ def extra_bars(reals: list[str]) -> dict:
             if not p.stem.endswith("_30fps")]
     Xs = np.vstack([x for x, _ in sims]) if sims else np.zeros((0, real[0][0].shape[1]))
     ys = np.concatenate([y for _, y in sims]) if sims else np.zeros(0)
-    r_only, both = [], []
+    r_only, both, P_r, P_b, Y = [], [], [], [], []
     for k in range(len(real)):
         Xt, yt = real[k]
         if len(np.unique(yt)) < 2:
             continue
         Xr = np.vstack([real[i][0] for i in range(len(real)) if i != k])
         yr = np.concatenate([real[i][1] for i in range(len(real)) if i != k])
-        for X, y, acc in ((Xr, yr, r_only), (np.vstack([Xs, Xr]), np.concatenate([ys, yr]), both)):
-            if len(np.unique(y)) < 2:
-                continue
-            clf = RandomForestClassifier(n_estimators=150, max_depth=8, class_weight="balanced_subsample",
-                                         random_state=42, n_jobs=-1).fit(X, y)
-            acc.append(balanced_accuracy_score(yt, clf.predict(Xt)))
-    return {"real": round(100 * np.mean(r_only)) if r_only else 0, "simreal": round(100 * np.mean(both)) if both else 0}
+        Y.append(yt)
+        for X, y, acc, P in ((Xr, yr, r_only, P_r), (np.vstack([Xs, Xr]), np.concatenate([ys, yr]), both, P_b)):
+            clf = s2r.make_model().fit(X, y)
+            p = clf.predict_proba(Xt)[:, list(clf.classes_).index(1)]
+            P.append(p)
+            acc.append(balanced_accuracy_score(yt, s2r.threshold_by_rate(p, float(y.mean()))))
+    from sklearn.metrics import roc_auc_score
+    out = {"real": round(100 * np.mean(r_only)) if r_only else 0, "simreal": round(100 * np.mean(both)) if both else 0}
+    if Y:
+        Yc = np.concatenate(Y)
+        out["real_auc"] = round(float(roc_auc_score(Yc, np.concatenate(P_r))), 3)
+        out["simreal_auc"] = round(float(roc_auc_score(Yc, np.concatenate(P_b))), 3)
+    return out
 
 
 def drift_data(reals: list[str]) -> dict:

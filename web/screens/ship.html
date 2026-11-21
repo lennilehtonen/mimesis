@@ -20,7 +20,7 @@
   <div class="main">
     <!-- hero metric: biggest thing on screen, reveals last -->
     <div class="card hero" id="sh-hero">
-      <div class="ch"><b>Proof</b><span class="tag"><i class="sw sim"></i>Trained on simulation only</span><span class="dot">·</span><span class="tag"><i class="sw real"></i>tested on real wrist data</span><span class="wire mono">/files/metrics.json</span></div>
+      <div class="ch"><b>Proof</b><span class="tag"><i class="sw sim"></i><span id="sh-herolabel">Trained on simulation only</span></span><span class="dot">·</span><span class="tag"><i class="sw real"></i>tested on real wrist data</span><span class="wire mono">/files/metrics.json</span></div>
       <div class="hbody">
         <div class="hm"><div class="big mono sim" id="sh-acc">--%</div><div class="cap">Contact accuracy</div></div>
         <div class="hm"><div class="big mono sim" id="sh-auc">AUC --</div><div class="cap">Area under ROC, GRAB / TAP / SLIP / SET-DOWN</div></div>
@@ -278,6 +278,7 @@
     try {
       const [m, s] = await Promise.all(['/files/metrics.json', '/files/dataset_stats.json'].map(u => fetch((M.api || '') + u + '?' + Date.now()).then(r => { if (!r.ok) throw 0; return r.json(); })));
       metrics = Object.assign(metrics, m); stats = Object.assign(stats, s);
+      if (m.hero_label) $('sh-herolabel').textContent = m.hero_label;
     } catch (e) { /* demo placeholders */ }
   }
   async function reveal() {

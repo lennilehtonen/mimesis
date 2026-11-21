@@ -41,7 +41,10 @@ def main():
 
     # 1. HTTP ingest with the verified Sensor Logger payload shape (real uvicorn server on a spare port)
     import urllib.request
-    port = 8765
+    import socket
+    with socket.socket() as so:
+        so.bind(("127.0.0.1", 0))
+        port = so.getsockname()[1]
     env = dict(os.environ, RIG_IMU_DIR=str(tmp / "raw_imu"))
     srv = subprocess.Popen([PY, "receiver.py", "--port", str(port), "--out-dir", str(tmp / "raw_imu")], cwd=ROOT, env=env,
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

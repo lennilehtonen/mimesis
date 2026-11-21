@@ -25,6 +25,8 @@ FEATURE_NAMES = [
     "jerk_mean", "jerk_std", "jerk_max",
     "da_mean", "da_max", "dw_mean", "dw_max",
     "jerk_p90",
+    # context: what happens 0.5 s before / after the window (a grab = rest before, motion after)
+    "e_before", "e_after", "e_win", "de_in", "de_out", "log_rise_in", "log_rise_out", "spike_ratio", "vib_ratio",
 ]
 
 
@@ -69,7 +71,36 @@ def window_features(df: pd.DataFrame):
         X[i] = [A.mean(), A.std(), A.max(), np.ptp(A), Gm.mean(), Gm.std(), Gm.max(), np.ptp(Gm),
                 J.mean(), J.std(), J.max(), da[sl].mean(), da[sl].max(), dw[sl].mean(), dw[sl].max(),
                 np.percentile(J, 90)]
-    return X, starts
+    return np.hstack([X, context_features(df, starts)]) if len(starts) else np.zeros((0, len(FEATURE_NAMES))), starts
+
+
+def context_features(df: pd.DataFrame, starts) -> np.ndarray:
+    from contact_detect import _rolling, add_features, motion_energy
+    f = add_features(df)
+    e = motion_energy(f)
+    a = f["accel_mag"].to_numpy()
+    sl = f["slip_score"].to_numpy()
+    base = _rolling(a, 100, "median")
+    n = len(a)
+    rows = []
+    for k in starts:
+        w = slice(k, k + WIN)
+        b = e[max(0, k - 50):k]
+        af = e[k + WIN:min(n, k + WIN + 50)]
+        ew = e[w].mean()
+        eb = b.mean() if len(b) else ew
+        ea = af.mean() if len(af) else ew
+        rows.append([eb, ea, ew, ew - eb, ea - ew, np.log((ew + .05) / (eb + .05)), np.log((ea + .05) / (ew + .05)),
+                     a[w].max() / (base[w].mean() + .15), sl[w].max() / (a[w].mean() + .1)])
+    return np.array(rows)
+
+
+def threshold_by_rate(proba: np.ndarray, pos_rate: float) -> np.ndarray:
+    """Label-free decision rule: flag the top `pos_rate` fraction of windows (rate taken from training data)."""
+    if len(proba) == 0:
+        return proba.astype(int)
+    th = np.quantile(proba, 1.0 - min(max(pos_rate, 0.01), 0.99))
+    return (proba >= th).astype(int)
 
 
 def episode_norm(X: np.ndarray) -> np.ndarray:
@@ -87,18 +118,25 @@ def window_labels(flag: np.ndarray, starts) -> np.ndarray:
 
 
 def sim_sample_labels(df: pd.DataFrame) -> np.ndarray:
-    lab, _ = detect_contacts(df, jerk_thresh=15.0, accel_peak_thresh=1.2, slip_hpf_thresh=0.5)
-    flag = lab["contact_flag"].to_numpy(int)
+    """Same event detector as the real phone (so labels mean the same thing), plus physics contact on/off edges."""
+    lab, _ = detect_contacts(df)
+    flag = lab["contact_flag"].to_numpy(int).copy()
     if "sim_contact_force_n" in df:
-        F = df["sim_contact_force_n"].to_numpy(float)
-        dF = np.abs(np.diff(F, prepend=F[:1]))
-        flag = flag | ((dF > 0.35) | (F > 4.0)).astype(int)
+        on = (df["sim_contact_force_n"].to_numpy(float) > 1.0).astype(int)
+        for i in np.where(np.abs(np.diff(on, prepend=on[:1])))[0]:
+            flag[max(0, i - 5):i + 6] = 1
     return flag
 
 
 def real_sample_labels(df: pd.DataFrame) -> np.ndarray:
     lab, _ = detect_contacts(df)
     return lab["contact_flag"].to_numpy(int)
+
+
+def make_model():
+    from sklearn.ensemble import RandomForestClassifier
+    return RandomForestClassifier(n_estimators=200, max_depth=12, class_weight="balanced_subsample",
+                                  random_state=42, n_jobs=-1)
 
 
 def run(sim_dir, real_paths, out_json=None) -> dict:
@@ -131,12 +169,11 @@ def run(sim_dir, real_paths, out_json=None) -> dict:
         raise SystemExit("no usable real windows")
     X_te, y_te = np.vstack(Xr), np.concatenate(yr)
 
-    clf = RandomForestClassifier(n_estimators=150, max_depth=8, class_weight="balanced_subsample",
-                                 random_state=42, n_jobs=-1)
+    clf = make_model()
     clf.fit(X_tr, y_tr)
-    pred = clf.predict(X_te)
     classes = list(clf.classes_)
     proba = clf.predict_proba(X_te)[:, classes.index(1)] if 1 in classes else np.zeros(len(X_te))
+    pred = threshold_by_rate(proba, float(y_tr.mean()))
 
     auc = None
     if len(np.unique(y_te)) == 2:
@@ -166,7 +203,7 @@ def run(sim_dir, real_paths, out_json=None) -> dict:
         "zero_shot_f1": float(f1_score(y_te, pred, zero_division=0)),
         "zero_shot_roc_auc": auc,
         "feature_norm": "per-episode median/IQR (no labels)",
-        "model": "RandomForestClassifier(n_estimators=150, max_depth=8, class_weight=balanced_subsample)",
+        "model": "RandomForestClassifier(n_estimators=200, max_depth=12, class_weight=balanced_subsample), threshold = training positive rate",
         "feature_importance": {n: round(float(v), 4) for n, v in zip(FEATURE_NAMES, clf.feature_importances_)},
     }
     if out_json:
