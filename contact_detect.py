@@ -123,39 +123,48 @@ def detect_contacts(df: pd.DataFrame, jerk_thresh: float = 20.0, accel_peak_thre
         return {"event": kind, "t_s": float(t[k]), "sample_idx": int(k), "jerk_peak_ms3": float(jerk[k]),
                 "accel_peak_ms2": float(amag_peak[k]), "gyro_mag_rads": float(gmag[k])}
 
-    events = []
-    for s0, s1 in bursts:
-        if s0 > 0 or e[0] < lo:  # a burst that starts at sample 0 has no known rest before it
-            events.append(ev("grab_onset", s0))
-        if s1 is not None:
-            events.append(ev("set_down", s1))
-    # taps: sharp spikes, at least 0.25 s away from burst edges
-    edges = [x["t_s"] for x in events]
-    jt = max(2.5 * jerk_thresh, 8.0 * float(np.median(jerk)) if n else jerk_thresh)
-    cand = np.where((jerk > jt) & (amag_peak > 2.0 * accel_peak_thresh))[0]
-    last_t = -1e9
+    # 1. TAP: impulsive spike, far above the local (0.5 s) acceleration level
+    base = _rolling(amag, 50, "median")
+    ratio = amag_peak / (base + 0.15)
+    jt = max(jerk_thresh * 7.5, 10.0 * float(np.median(jerk)) if n else 0.0)   # ~150 m/s^3 at defaults
+    cand = np.where((jerk > jt) & (amag_peak > 2.0 * accel_peak_thresh) & (ratio > 4.0))[0]
+    taps = []
     i = 0
     while i < len(cand):
         j = i
-        while j + 1 < len(cand) and t[cand[j + 1]] - t[cand[j]] < 0.08:
+        while j + 1 < len(cand) and t[cand[j + 1]] - t[cand[j]] < 0.15:
             j += 1
         seg = cand[i:j + 1]
         k = int(seg[np.argmax(jerk[seg])])
         i = j + 1
-        if t[k] - last_t < refractory_s or any(abs(t[k] - x) < 0.25 for x in edges):
-            continue
-        last_t = t[k]
-        events.append(ev("impact_or_tap", k))
+        if not taps or t[k] - t[taps[-1]] >= refractory_s:
+            taps.append(k)
+    events = [ev("impact_or_tap", k) for k in taps]
+    tap_t = np.array([t[k] for k in taps])
 
-    # slip / scrape: sustained high-pass vibration not explained by a single impact
-    hot = slip > slip_hpf_thresh
+    # 2. GRAB / SET-DOWN from movement bursts; a short burst that is just a tap's ringing is not a grab
+    for s0, s1 in bursts:
+        t1 = t[s1] if s1 is not None else t[-1]
+        has_tap = len(tap_t) and np.any((tap_t >= t[s0] - 0.15) & (tap_t <= t1 + 0.15))
+        if has_tap and t1 - t[s0] < 0.8:
+            continue
+        if s0 > 0 or e[0] < lo:  # a burst that starts at sample 0 has no known rest before it
+            if not (len(tap_t) and np.min(np.abs(tap_t - t[s0])) < 0.15):
+                events.append(ev("grab_onset", s0))
+        if s1 is not None and not (len(tap_t) and np.min(np.abs(tap_t - t[s1])) < 0.15):
+            events.append(ev("set_down", s1))
+
+    # 3. SLIP / SCRAPE: sustained high-frequency vibration that dominates the gross motion
+    lp = _rolling(amag, 50, "mean")
+    vt = max(slip_hpf_thresh, 3.0 * float(np.median(slip)) if n else 0.0)
+    hot = (slip > vt) & (slip > 0.8 * (lp + 0.1))
     k = 0
     while k < n:
         if hot[k]:
             e2 = k
             while e2 + 1 < n and hot[e2 + 1]:
                 e2 += 1
-            if t[e2] - t[k] >= 0.25 and not any(abs(x["t_s"] - t[k]) < 0.3 for x in events):
+            if t[e2] - t[k] >= 0.2 and not (len(tap_t) and np.any(np.abs(tap_t - t[k]) < 0.3)):
                 m = int(k + np.argmax(slip[k:e2 + 1]))
                 events.append(ev("slip_or_scrape", m))
                 ids[k:e2 + 1] = EVENT_IDS["slip_or_scrape"]

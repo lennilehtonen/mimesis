@@ -51,15 +51,13 @@ def make_imu(duration: float, offset: float, hz: float = 100.0, seed: int = 0) -
         ph = (t[m] - t0 - base) / (t1 - t0)
         a[m, axis] += amp * np.sin(2 * np.pi * ph)
         g[m, (axis + 1) % 3] += 0.6 * amp / 2 * np.sin(np.pi * ph)
-    # still hand before the grab so the detector labels it grab_onset
-    _impulse(a, t, 4.0 + base, 6.0, (0.3, 0.3, 1.0))  # grab
-    bump(4.2, 6.2, 0.9, 1)
-    _impulse(a, t, 5.5 + base, 9.0, (0.1, 0.2, 1.0))  # tap
-    m = (t >= 6.3 + base) & (t < 7.1 + base)            # scrape / slip vibration
-    # |a| stays < 3.5 m/s^2 so it is not an impact, but high-pass RMS > 0.75 -> slip_or_scrape
+    # still hand until 4.0 s, then one continuous pick-up movement until 8.5 s, then still again:
+    # contact_detect labels the burst start grab_onset and the return to rest set_down.
+    bump(4.0, 6.3, 1.2, 1)                                # reach + lift
+    _impulse(a, t, 5.5 + base, 9.0, (0.1, 0.2, 1.0))      # tap: sharp spike far above the local level
+    m = (t >= 6.3 + base) & (t < 7.1 + base)              # scrape / slip: vibration dominates gross motion
     a[m] += rng.normal(0, 0.25, (m.sum(), 3)) + np.array([1.4, 1.0, 0.8])[None, :] * np.sin(2 * np.pi * 13 * t[m])[:, None]
-    bump(7.3, 8.3, 1.0, 2)
-    _impulse(a, t, 8.5 + base, 8.0, (0.2, 0.1, 1.0))  # set-down, then still
+    bump(7.1, 8.5, 1.2, 2)                                # carry + place, then rest
     roll = 0.1 * np.sin(0.3 * t)
     pitch = 0.05 * np.cos(0.2 * t)
     yaw = 0.02 * t

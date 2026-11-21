@@ -283,7 +283,8 @@ class LiveContacts:
             # GRAB and SET-DOWN must alternate; same kind never twice within 0.8 s
             if kind in ("grab_onset", "set_down") and kind == self.last_motion:
                 continue
-            if tns - self.last_kind_ns.get(kind, 0) < 800_000_000:
+            gap = {"impact_or_tap": 300_000_000, "slip_or_scrape": 600_000_000}.get(kind, 800_000_000)
+            if tns - self.last_kind_ns.get(kind, 0) < gap:
                 continue
             if kind in ("grab_onset", "set_down"):
                 self.last_motion = kind
