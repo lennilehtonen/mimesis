@@ -253,6 +253,8 @@ class LiveContacts:
         self.last_run = 0.0
         self.events: deque = deque(maxlen=200)
         self.seq = 0
+        self.last_motion = "set_down"
+        self.last_kind_ns: dict = {}
 
     def update(self):
         now = time.time()
@@ -260,8 +262,8 @@ class LiveContacts:
             return
         self.last_run = now
         with LOCK:
-            samples = list(LIVE)[-300:]
-        if len(samples) < 40:
+            samples = list(LIVE)[-1000:]  # 10 s: stable noise floor for the adaptive thresholds
+        if len(samples) < 60:
             return
         from contact_detect import UI_KIND, detect_contacts
         df = pd.DataFrame(samples)
@@ -271,11 +273,21 @@ class LiveContacts:
         except Exception as e:
             print("live contact error:", e)
             return
+        t_end = int(df["timestamp_ns"].iloc[-1])
         for ev in evs:
             tns = int(df["timestamp_ns"].iloc[ev["sample_idx"]])
-            # ignore events in the trailing 0.6 s (classification needs context after the peak)
-            if tns <= self.last_emit_ns or tns > int(df["timestamp_ns"].iloc[-1]) - 600_000_000:
+            kind = ev["event"]
+            # trailing 0.3 s: a burst edge needs a little context after it
+            if tns <= self.last_emit_ns or tns > t_end - 300_000_000:
                 continue
+            # GRAB and SET-DOWN must alternate; same kind never twice within 0.8 s
+            if kind in ("grab_onset", "set_down") and kind == self.last_motion:
+                continue
+            if tns - self.last_kind_ns.get(kind, 0) < 800_000_000:
+                continue
+            if kind in ("grab_onset", "set_down"):
+                self.last_motion = kind
+            self.last_kind_ns[kind] = tns
             self.last_emit_ns = tns
             self.seq += 1
             self.events.append({"seq": self.seq, "time_ns": tns, "kind": UI_KIND.get(ev["event"], "TAP"),

@@ -55,9 +55,58 @@ def add_features(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def motion_energy(out: pd.DataFrame) -> np.ndarray:
+    """0.2 s smoothed |a| + 0.3 |gyro|: low while the hand rests, a burst for every reach / pick-up."""
+    return _rolling((out["accel_mag"] + 0.3 * out["gyro_mag"]).to_numpy(float), 20, "mean")
+
+
+def motion_bursts(e: np.ndarray, t: np.ndarray, still_thresh=None, move_thresh=None,
+                  min_still_s: float = 0.25, min_move_s: float = 0.12):
+    """Hysteresis segmentation into [start, end) index pairs of movement bursts.
+    Thresholds adapt to this recording's noise floor (20th percentile of the energy)."""
+    floor = float(np.percentile(e, 20)) if len(e) else 0.0
+    lo = still_thresh if still_thresh is not None else max(0.18, 2.5 * floor)
+    hi = move_thresh if move_thresh is not None else max(0.35, 1.8 * lo)
+    bursts, moving, s0, last_still = [], False, None, 0
+    i, n = 0, len(e)
+    while i < n:
+        if not moving:
+            if e[i] > hi:
+                # need a calm stretch before (or the start of the recording), and the move must persist
+                j = i
+                while j < n and e[j] > lo and t[j] - t[i] < min_move_s:
+                    j += 1
+                if j >= n or t[j] - t[i] >= min_move_s:
+                    moving, s0 = True, i
+                    i = j
+                    continue
+        else:
+            if e[i] < lo:
+                j = i
+                while j < n and e[j] < lo and t[j] - t[i] < min_still_s:
+                    j += 1
+                if j < n and t[j] - t[i] >= min_still_s:
+                    bursts.append((s0, i))
+                    moving = False
+                    i = j
+                    continue
+                if j >= n:
+                    break
+        i += 1
+    if moving:
+        bursts.append((s0, None))  # still moving at the end of the window
+    return bursts, lo, hi
+
+
 def detect_contacts(df: pd.DataFrame, jerk_thresh: float = 20.0, accel_peak_thresh: float = 1.5,
                     slip_hpf_thresh: float = 0.6, refractory_s: float = 0.25):
-    """Return (labelled copy of df, list of event dicts)."""
+    """Return (labelled copy of df, list of event dicts).
+
+    grab_onset    : start of a movement burst after the hand was at rest (reach / pick up)
+    set_down      : the hand comes back to rest after a burst
+    impact_or_tap : a sharp jerk + acceleration spike inside a burst (knock, tap, clap)
+    slip_or_scrape: sustained high-pass vibration
+    """
     out = add_features(df)
     n = len(out)
     t = time_axis(out)
@@ -66,12 +115,25 @@ def detect_contacts(df: pd.DataFrame, jerk_thresh: float = 20.0, accel_peak_thre
     gmag = out["gyro_mag"].to_numpy()
     slip = out["slip_score"].to_numpy()
     amag_peak = _rolling(amag, 7, "max")
-    moving = (_rolling(amag, 15, "mean") > 0.35) | (_rolling(gmag, 15, "mean") > 0.35)
-    ids = np.where(moving, EVENT_IDS["motion"], EVENT_IDS["idle"]).astype(int)
+    e = motion_energy(out)
+    bursts, lo, hi = motion_bursts(e, t)
+    ids = np.where(e > lo, EVENT_IDS["motion"], EVENT_IDS["idle"]).astype(int)
+
+    def ev(kind, k):
+        return {"event": kind, "t_s": float(t[k]), "sample_idx": int(k), "jerk_peak_ms3": float(jerk[k]),
+                "accel_peak_ms2": float(amag_peak[k]), "gyro_mag_rads": float(gmag[k])}
 
     events = []
+    for s0, s1 in bursts:
+        if s0 > 0 or e[0] < lo:  # a burst that starts at sample 0 has no known rest before it
+            events.append(ev("grab_onset", s0))
+        if s1 is not None:
+            events.append(ev("set_down", s1))
+    # taps: sharp spikes, at least 0.25 s away from burst edges
+    edges = [x["t_s"] for x in events]
+    jt = max(2.5 * jerk_thresh, 8.0 * float(np.median(jerk)) if n else jerk_thresh)
+    cand = np.where((jerk > jt) & (amag_peak > 2.0 * accel_peak_thresh))[0]
     last_t = -1e9
-    cand = np.where((jerk > jerk_thresh) & (amag_peak > accel_peak_thresh))[0]
     i = 0
     while i < len(cand):
         j = i
@@ -80,45 +142,31 @@ def detect_contacts(df: pd.DataFrame, jerk_thresh: float = 20.0, accel_peak_thre
         seg = cand[i:j + 1]
         k = int(seg[np.argmax(jerk[seg])])
         i = j + 1
-        if t[k] - last_t < refractory_s:
+        if t[k] - last_t < refractory_s or any(abs(t[k] - x) < 0.25 for x in edges):
             continue
         last_t = t[k]
-        after = slice(k + 5, min(n, k + 60))
-        before = slice(max(0, k - 60), max(0, k - 5))
-        still_after = n > k + 20 and np.mean(moving[after]) < 0.35
-        still_before = k > 20 and np.mean(moving[before]) < 0.35
-        if not events and not still_after:
-            kind = "grab_onset"
-        elif still_after:
-            kind = "set_down"
-        elif still_before:
-            kind = "grab_onset"
-        else:
-            kind = "impact_or_tap"
-        events.append({"event": kind, "t_s": float(t[k]), "sample_idx": k, "jerk_peak_ms3": float(jerk[k]),
-                       "accel_peak_ms2": float(amag_peak[k]), "gyro_mag_rads": float(gmag[k])})
+        events.append(ev("impact_or_tap", k))
 
     # slip / scrape: sustained high-pass vibration not explained by a single impact
     hot = slip > slip_hpf_thresh
     k = 0
     while k < n:
         if hot[k]:
-            e = k
-            while e + 1 < n and hot[e + 1]:
-                e += 1
-            if t[e] - t[k] >= 0.15 and not any(abs(ev["t_s"] - t[k]) < 0.12 for ev in events):
-                m = int(k + np.argmax(slip[k:e + 1]))
-                events.append({"event": "slip_or_scrape", "t_s": float(t[m]), "sample_idx": m,
-                               "jerk_peak_ms3": float(jerk[m]), "accel_peak_ms2": float(amag_peak[m]),
-                               "gyro_mag_rads": float(gmag[m])})
-                ids[k:e + 1] = EVENT_IDS["slip_or_scrape"]
-            k = e + 1
+            e2 = k
+            while e2 + 1 < n and hot[e2 + 1]:
+                e2 += 1
+            if t[e2] - t[k] >= 0.25 and not any(abs(x["t_s"] - t[k]) < 0.3 for x in events):
+                m = int(k + np.argmax(slip[k:e2 + 1]))
+                events.append(ev("slip_or_scrape", m))
+                ids[k:e2 + 1] = EVENT_IDS["slip_or_scrape"]
+            k = e2 + 1
         else:
             k += 1
-    events.sort(key=lambda ev: ev["t_s"])
-    for ev in events:
-        k = ev["sample_idx"]
-        ids[max(0, k - 5):min(n, k + 6)] = EVENT_IDS[ev["event"]]
+    events.sort(key=lambda x: x["t_s"])
+    for x in events:
+        k = x["sample_idx"]
+        ids[max(0, k - 5):min(n, k + 6)] = EVENT_IDS[x["event"]]
+    out["motion_energy"] = e
     out["contact_event_id"] = ids
     out["contact_event"] = [EVENT_NAMES[v] for v in ids]
     out["contact_flag"] = (ids >= 2).astype(int)
