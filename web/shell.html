@@ -62,6 +62,11 @@ window.M = (() => {
     api: '' /* e.g. 'http://localhost:8000' */
   };
 })();
+/* decided here, before any screen script runs: static host (GitHub Pages) = recorded results from ./files,
+   no server and no live phone stream; file:// or ?demo = synthetic demo data */
+window.MIMESIS_STATIC = /github\.io$/.test(location.hostname) || /[?&]static\b/.test(location.search);
+window.MIMESIS_DEMO = location.protocol === 'file:' || /[?&]demo\b/.test(location.search);
+if (MIMESIS_STATIC) M.api = '.';
 
 </script>
 </head>
@@ -137,9 +142,6 @@ M.on('status', s => {
 /* ---------- LIVE data source: WebSocket /ws, polling /latest + /status as fallback. ----------
    Served by receiver.py (http:) -> live. Opened as a file or with ?demo -> synthetic DEMO block below. */
 window.MIMESIS_DEMO = location.protocol === 'file:' || /[?&]demo\b/.test(location.search);
-/* static host (GitHub Pages): recorded results from ./files, no server, no live phone stream */
-window.MIMESIS_STATIC = /github\.io$/.test(location.hostname) || /[?&]static\b/.test(location.search);
-if (MIMESIS_STATIC) M.api = '.';
 M.camera = false;
 if (!MIMESIS_DEMO && !MIMESIS_STATIC) addEventListener('DOMContentLoaded', () => {
   let ws = null, polling = null, lastStatus = { wrist: false, hz: 0, episodes: 0 }, lastT = -1;
