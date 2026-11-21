@@ -354,7 +354,7 @@ Per-frame features in `data/chunk-000/file-000.parquet`:
 
 ## Results
 
-Measured at NullHacks Helsinki on 21 Nov 2026: 10 real wrist-IMU takes of "pick up cup" (Sensor Logger, 100 Hz over USB tethering, 1,451 s total), multiplied into 300 MuJoCo variants from one take (`ep_155834`).
+Measured at NullHacks Helsinki on 21 Nov 2026: 10 real wrist-IMU takes of "pick up cup" (Sensor Logger, 100 Hz over USB tethering, 1,447 s total), multiplied into 300 MuJoCo variants from one take (`ep_155834`).
 
 | Metric | Real phone data | Synthetic regression test (`test_pipeline.py`) |
 |---|---|---|
