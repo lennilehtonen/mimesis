@@ -273,7 +273,7 @@ def retarget_episode(df: pd.DataFrame) -> pd.DataFrame:
 
 EXACT_GRASP_Z = 0.090
 EXACT_MIN_Z = 0.03
-EXACT_MAX_TILT = np.deg2rad(40.0)
+EXACT_MAX_TILT = np.deg2rad(0.0)  # two-finger gripper stays vertical; yaw follows the hand
 
 
 def _limit_tilt(R: Rotation, max_tilt: float) -> Rotation:
@@ -334,7 +334,10 @@ def retarget_exact(hands_df: pd.DataFrame, width: int, height: int, video_path=N
 
     T = float(np.nanmax(tf)) if len(tf) else 0.0
     t = np.arange(0.0, T + 1e-9, 1.0 / HZ)
-    P = np.column_stack([np.interp(t, tf, held(c)) for c in ("x", "y", "z")])
+    pc = ("gx", "gy", "gz") if {"gx", "gy", "gz"} <= set(tr) else ("x", "y", "z")  # follow the grip centre
+    P = np.column_stack([np.interp(t, tf, held(c)) for c in pc])
+    # outside the span where the hand is in view the gripper waits high above (no hand = nothing to copy)
+    t_in, t_out = float(tf[iv[0]]), float(tf[iv[-1]])
 
     ap = pd.to_numeric(tr.get("aperture_m", pd.Series(np.nan, index=tr.index)), errors="coerce").to_numpy(float)
     ap_ok = valid & np.isfinite(ap)
@@ -370,6 +373,13 @@ def retarget_exact(hands_df: pd.DataFrame, width: int, height: int, video_path=N
     kg = int(np.clip(np.searchsorted(t, t_g), 0, len(t) - 1))
     obj_xy = [float(P[kg, 0]), float(P[kg, 1])]
     P[:, 2] = np.maximum(P[:, 2] + (EXACT_GRASP_Z - P[kg, 2]), EXACT_MIN_Z)
+    park_z = 0.25
+    for k in range(len(t)):
+        d = max(t_in - t[k], t[k] - t_out, 0.0)
+        if d > 0:  # blend over 0.5 s from the first/last seen pose up to the parking height
+            w = min(1.0, d / 0.5)
+            P[k, 2] = (1 - w) * P[k, 2] + w * park_z
+            grip[k] = (1 - w) * grip[k] + w * GRIP_OPEN
 
     # orientation relative to the grasp pose (gripper points straight down at the closure), tilt <= 40 deg
     q = tr[["qw", "qx", "qy", "qz"]].apply(pd.to_numeric, errors="coerce").to_numpy(float) \

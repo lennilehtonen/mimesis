@@ -244,6 +244,7 @@ def track_to_table(hands_df: pd.DataFrame, width: int, height: int, table: dict 
     cam = np.full((n, 3), np.nan)
     quat_cam = np.full((n, 4), np.nan)
     aper = np.full(n, np.nan)
+    grasp = np.full((n, 3), np.nan)   # grip centre: midpoint of thumb tip (4) and middle fingertip (12)
     last_z = None
     last_i = -10**9
     for k in range(n):
@@ -266,6 +267,7 @@ def track_to_table(hands_df: pd.DataFrame, width: int, height: int, table: dict 
         cam[k] = P[WRIST]
         quat_cam[k] = _rot_to_quat(F)
         aper[k] = float(np.linalg.norm(W[k, THUMB_TIP] - W[k, INDEX_TIP]))
+        grasp[k] = 0.5 * (P[4] + P[12])
         last_z, last_i = z, k
 
     raw_valid = np.isfinite(cam[:, 0])
@@ -282,7 +284,7 @@ def track_to_table(hands_df: pd.DataFrame, width: int, height: int, table: dict 
     for a, b in zip(idx[:-1], idx[1:]):
         if b - a > 1 and (t_s[b] - t_s[a]) <= MAX_GAP_S:
             valid[a + 1:b] = True
-    cols = np.column_stack([cam, quat_cam, aper])
+    cols = np.column_stack([cam, quat_cam, aper, grasp])
     filled = np.full_like(cols, np.nan)
     if len(idx) >= 1:
         for j in range(cols.shape[1]):
@@ -290,7 +292,7 @@ def track_to_table(hands_df: pd.DataFrame, width: int, height: int, table: dict 
 
     # smooth positions + aperture per contiguous valid segment: 5-median then 5-mean
     for a, b in _segments(valid):
-        for j in (0, 1, 2, 7):
+        for j in (0, 1, 2, 7, 8, 9, 10):
             s = pd.Series(filled[a:b, j])
             s = s.rolling(5, center=True, min_periods=1).median().rolling(5, center=True, min_periods=1).mean()
             filled[a:b, j] = s.to_numpy()
@@ -300,6 +302,7 @@ def track_to_table(hands_df: pd.DataFrame, width: int, height: int, table: dict 
     Rt, tt = np.asarray(table["R"], float), np.asarray(table["t"], float).ravel()
     cam_f = filled[:, :3]
     tab = (cam_f - tt) @ Rt                                     # R^T (cam - t) per row
+    gtab = (filled[:, 8:11] - tt) @ Rt
     q_tab = np.full((n, 4), np.nan)
     for k in np.flatnonzero(valid):
         qw, qx, qy, qz = filled[k, 3:7]
@@ -318,6 +321,7 @@ def track_to_table(hands_df: pd.DataFrame, width: int, height: int, table: dict 
         "x": tab[:, 0], "y": tab[:, 1], "z": tab[:, 2],
         "qw": q_tab[:, 0], "qx": q_tab[:, 1], "qy": q_tab[:, 2], "qz": q_tab[:, 3],
         "aperture_m": filled[:, 7],
+        "gx": gtab[:, 0], "gy": gtab[:, 1], "gz": gtab[:, 2],
         "cam_x": cam_f[:, 0], "cam_y": cam_f[:, 1], "cam_z": cam_f[:, 2],
     })
     if "frame_idx" in hands_df:
