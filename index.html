@@ -1061,7 +1061,10 @@ if (MIMESIS_STATIC) M.api = '.';
     t.el.querySelector('.mx-bd').innerHTML = v.slip ? 'SLIP!' : 'OK';
     t.el.querySelector('.mx-idx').textContent = '#' + String(j).padStart(4, '0');
     t.el.querySelector('.mx-lab').innerHTML = `<b>${ob}</b> · ${mass} g · μ ${mu}`;
-    if (videoOK && L) { t.vid.preload = 'auto'; t.vid.src = (window.M && M.api || '') + `/files/variants/${j}.mp4?v=${labelsVer}`; t.vid.load(); t.vid.onloadeddata = () => { t.vid.classList.add('on'); t.vid.play().catch(() => {}); }; }
+    if (videoOK && L) { const src = (window.M && M.api || '') + `/files/variants/${j}.mp4?v=${labelsVer}`;
+      if (t.vid.getAttribute('src') === src && t.vid.readyState >= 2) { t.vid.classList.add('on'); t.vid.currentTime = 0; t.vid.play().catch(() => {}); }
+      else { t.vid.preload = 'auto'; t.vid.src = src; t.vid.load(); }
+      t.vid.onloadeddata = () => { t.vid.classList.add('on'); t.vid.play().catch(() => {}); }; }
     t.el.classList.add('full');
     if (v.slip && !instant) { t.el.classList.add('flash'); setTimeout(() => t.el.classList.remove('flash'), 420); }
   }
@@ -1132,7 +1135,7 @@ if (MIMESIS_STATIC) M.api = '.';
     seedBase++; N = +slider.value; setState('run'); t0 = performance.now(); cAnim = null; setNum(0); genCount = 0; thumbs.forEach(t => { t.v = null; t.el.classList.remove('full', 'slip'); t.sp.textContent = ''; t.g.clearRect(0, 0, 170, 68); });
     tiles.forEach(t => { t.full = false; t.v = null; t.el.classList.remove('full', 'slip', 'flash'); t.vid.classList.remove('on'); });
     lastThumb = 0; drawDonut(0); status();
-    if (!window.MIMESIS_DEMO) { lastLive = null; liveJob = { state: 'running', progress: { done: 0, total: N, ok: 0, slip: 0 } }; liveStart = performance.now();
+    if (!window.MIMESIS_DEMO && !window.MIMESIS_STATIC) { lastLive = null; liveJob = { state: 'running', progress: { done: 0, total: N, ok: 0, slip: 0 } }; liveStart = performance.now();
       fetch(`/multiply?n=${N}&render=9`, { method: 'POST' }).then(r => r.json()).then(j => { if (j.state === 'error') liveJob = null; }).catch(() => { liveJob = null; }); }
   }
   // live: progress of the backend multiply job (sim/augment.py in a subprocess) arrives over /ws
