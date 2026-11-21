@@ -193,8 +193,15 @@ def _imu_fallback(df, t_src, t, T):
             _, events = detect_contacts(tmp)
             grabs = [e["t_s"] for e in events if e["event"] == "grab_onset"]
             sets = [e["t_s"] for e in events if e["event"] == "set_down"]
-            g = grabs[0] if grabs else None
-            s = sets[-1] if sets else None
+            # first complete pick-and-place: a grab followed by a set-down 1-8 s later
+            g, s = None, None
+            for gg in grabs:
+                nxt = [x for x in sets if gg + 1.0 < x < gg + 8.0]
+                if nxt:
+                    g, s = gg, nxt[0]
+                    break
+            if g is None:
+                g = grabs[0] if grabs else None
             if g is not None and s is not None and s > g + 1.0:
                 t_grab, t_set = g, s
             elif g is not None and g + 1.5 < 0.78 * T:
@@ -202,7 +209,7 @@ def _imu_fallback(df, t_src, t, T):
     except Exception as exc:  # pragma: no cover
         print(f"[retarget] detect_contacts failed ({exc}); using defaults", file=sys.stderr)
     t_grab = max(t_grab, 1.3)
-    t_set = max(t_set, t_grab + 2.6)
+    t_set = max(t_set, t_grab + 4.0)  # a real pick-and-place: lift, carry, place
     O, C = GRIP_OPEN, GRIP_CLOSED
     zg, zl = 0.090, 0.205
     knots = [
