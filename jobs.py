@@ -62,7 +62,7 @@ def episode_meta(eid: str) -> dict:
 
 def find_video(eid: str) -> Path | None:
     """Chest-cam clip for an episode. Browser uploads (webm / VFR mp4) are transcoded to 30 fps CFR."""
-    cands = [p for p in VID.glob(f"{eid}.*") if p.suffix.lower() in VIDEO_EXT]
+    cands = [p for p in VID.glob(f"{eid}.*") if p.suffix.lower() in VIDEO_EXT and p.stat().st_size > 10_000]
     if not cands:
         return None
     src = sorted(cands, key=lambda p: p.suffix.lower() != ".mov")[0]

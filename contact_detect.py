@@ -164,7 +164,13 @@ def detect_contacts(df: pd.DataFrame, jerk_thresh: float = 20.0, accel_peak_thre
             e2 = k
             while e2 + 1 < n and hot[e2 + 1]:
                 e2 += 1
-            if t[e2] - t[k] >= 0.15 and not (len(tap_t) and np.any(np.abs(tap_t - t[k]) < 0.2)):
+            long_slip = t[e2] - t[k] >= 0.3
+            if long_slip and len(tap_t):  # sustained vibration = slip; spikes inside it are part of the slip
+                inside = (tap_t >= t[k] - 0.1) & (tap_t <= t[e2] + 0.1)
+                if inside.any():
+                    events = [x for x in events if not (x["event"] == "impact_or_tap" and t[k] - 0.1 <= x["t_s"] <= t[e2] + 0.1)]
+                    tap_t = tap_t[~inside]
+            if t[e2] - t[k] >= 0.15 and (long_slip or not (len(tap_t) and np.any(np.abs(tap_t - t[k]) < 0.2))):
                 m = int(k + np.argmax(slip[k:e2 + 1]))
                 events.append(ev("slip_or_scrape", m))
                 ids[k:e2 + 1] = EVENT_IDS["slip_or_scrape"]

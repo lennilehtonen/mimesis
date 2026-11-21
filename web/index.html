@@ -367,6 +367,7 @@ window.M = (() => {
     if (!recorder) return; const rec = recorder; recorder = null;
     rec.onstop = async () => {
       const blob = new Blob(chunks, { type: rec.mimeType }); const fd = new FormData();
+      if (blob.size < 10000) { $('rc-livetxt').textContent = 'NO VIDEO · camera?'; await post('/process/' + ep); setTimeout(() => $('rc-livetxt').textContent = 'LIVE', 3000); return; }
       fd.append('file', blob, ep + (rec.mimeType.includes('mp4') ? '.mp4' : '.webm'));
       $('rc-livetxt').textContent = 'UPLOADING';
       try { await fetch('/upload/' + ep, { method: 'POST', body: fd }); $('rc-livetxt').textContent = 'PROCESSING'; await post('/process/' + ep); }
