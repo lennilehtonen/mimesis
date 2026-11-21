@@ -234,7 +234,7 @@
   let cAnim = null;
   let videoOK = false, labels = null;
   // WIRE: GET /files/variants/labels.json -> [{n,object,mass_g,mu,slip}], videos GET /files/variants/<n>.mp4
-  if (window.MIMESIS_DEMO === false || true) fetch((window.M && M.api || '') + '/files/variants/labels.json').then(r => r.ok ? r.json() : null).then(j => { if (Array.isArray(j) && j.length) { labels = j; videoOK = true; } }).catch(() => {});
+  if (window.MIMESIS_DEMO === false || true) fetch((window.M && M.api || '') + '/files/variants/labels.json').then(r => r.ok ? r.json() : null).then(j => { if (Array.isArray(j) && j.length) { labels = j; videoOK = true; if (!window.MIMESIS_DEMO) tiles.forEach((t, k) => land(t, k, true)); } }).catch(() => {});
 
   function buildGrid(keepFull) {
     grid.innerHTML = ''; grid.className = 'mx-grid g' + n;
