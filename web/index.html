@@ -230,7 +230,7 @@ window.M = (() => {
   M.on('hand', d => { hand = d.joints; hands2 = null; });
   let hands2 = null;   // live MediaPipe result: array of 21-joint hands in canvas-normalized coords
   M.on('status', s => {
-    connected = !!s.wrist; root.classList.toggle('disc', !connected);
+    connected = !!s.wrist; root.classList.remove('disc');  // video-only product: no wrist overlay
     $('rc-hz').textContent = s.wrist ? Math.round(s.hz) : '—'; $('rc-neps').textContent = s.episodes;
     $('rc-livetxt').textContent = s.camera ? (recOn ? 'REC' : 'LIVE') : 'NO CAMERA';
   });
@@ -703,7 +703,7 @@ window.M = (() => {
     for (let s = 0; s <= E.duration; s++) { const x = X(s); c.strokeStyle = s % 2 ? line : ls; c.beginPath(); c.moveTo(x, s % 2 ? 26 : 20); c.lineTo(x, 36); c.stroke();
       if (s % 2 === 0 && x + 44 < TW) c.fillText('+' + s + 's', x + 4, 12); }
     // row separators + labels
-    const lab = [['imu', 'IMU |a|', 'm/s²', real], ['grip', 'GRIPPER', 'sim robot', sim], ['con', 'CONTACTS', 'from IMU', V('--text')]];
+    const vid = E && E.signal; const lab = [['imu', vid ? 'FINGER OPENING' : 'IMU |a|', vid ? 'cm, from video' : 'm/s²', real], ['grip', 'GRIPPER', 'sim robot', sim], ['con', 'CONTACTS', vid ? 'from video' : 'from IMU', V('--text')]];
     lab.forEach(([k, a, b, col]) => { const [y0, y1] = R[k]; c.strokeStyle = ls; c.beginPath(); c.moveTo(0, y0 + .5); c.lineTo(TW, y0 + .5); c.stroke();
       c.fillStyle = col; c.font = '600 16px ' + V('--font-ui'); c.fillText(a, 16, y0 + 24); c.fillStyle = mut; c.font = '400 14px ' + V('--font-ui'); c.fillText(b, 16, y0 + 46); });
     c.strokeStyle = ls; c.beginPath(); c.moveTo(LBL + .5, 0); c.lineTo(LBL + .5, TH); c.stroke();

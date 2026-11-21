@@ -82,7 +82,72 @@ def h264(src: Path, dst: Path) -> None:
 
 
 # --------------------------------------------------------------------------- process
+def hand_events(eid: str, video: Path, vdur: float):
+    """GRAB / RELEASE from the video: thumb-index opening of the metric 3D hand track (sim.hand3d).
+    Returns (contacts, gripper segments, opening in cm at 100 Hz on the video clock)."""
+    import cv2
+    from sim import hand3d
+    hp = HANDS / f"{eid}_hands.parquet"
+    cap = cv2.VideoCapture(str(video))
+    w, h = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    cap.release()
+    t100 = np.arange(0, vdur, 0.01)
+    try:
+        tr = hand3d.track_to_table(pd.read_parquet(hp), w, h, table=hand3d.calibrate_table(str(video)))
+    except Exception as e:
+        print("hand track failed:", e, flush=True)
+        return [], [], [0.0] * len(t100)
+    v = tr[tr["valid"].astype(bool)]
+    if len(v) < 10:
+        return [], [{"t0": 0, "t1": vdur, "state": "open"}], [0.0] * len(t100)
+    t, ap = v["t_s"].to_numpy(float), pd.Series(v["aperture_m"].to_numpy(float)).rolling(5, center=True, min_periods=1).median().to_numpy()
+    lo, hi = np.percentile(ap, 10), np.percentile(ap, 90)
+    close_th, open_th = lo + 0.35 * (hi - lo), lo + 0.65 * (hi - lo)   # hysteresis
+    contacts, gripper, state, t_last = [], [], "open", 0.0
+    if hi - lo > 0.005:
+        for ti, a in zip(t, ap):
+            if state == "open" and a < close_th:
+                contacts.append({"kind": "GRAB", "t": round(float(ti), 2), "event": "grab_onset"})
+                gripper.append({"t0": t_last, "t1": float(ti), "state": "open"}); state, t_last = "closed", float(ti)
+            elif state == "closed" and a > open_th:
+                contacts.append({"kind": "SET-DOWN", "t": round(float(ti), 2), "event": "release"})
+                gripper.append({"t0": t_last, "t1": float(ti), "state": "closed"}); state, t_last = "open", float(ti)
+    gripper.append({"t0": t_last, "t1": vdur, "state": state})
+    ap100 = np.interp(t100, t, ap * 100, left=0, right=0)
+    ap100[(t100 < t[0]) | (t100 > t[-1])] = 0
+    return contacts, gripper, [round(float(x), 2) for x in ap100]
+
+
+def process_video_only(eid: str) -> dict:
+    """Take with chest video but no wrist IMU: hands -> exact 3D twin -> Episode tab (no IMU timeline)."""
+    video = find_video(eid)
+    if video is None:
+        raise SystemExit(f"{eid}: no IMU and no video")
+    hands_p, overlay = HANDS / f"{eid}_hands.parquet", HANDS / f"{eid}_overlay.mp4"
+    step("hands (MediaPipe), video only")
+    from hands import run_hands
+    run_hands(str(video), str(hands_p), str(overlay), swap_handedness=True)
+    step("exact 3D twin (MuJoCo)")
+    twin = sim_twin(eid, ALIGNED / f"{eid}.parquet", "Pick up cup")
+    vdur = video_duration(video)
+    contacts, gripper, ap100 = hand_events(eid, video, vdur)
+    pub = {"id": eid, "task": "pick up cup", "duration": round(vdur, 2), "fps": 30,
+           "frames": int(round(vdur * 30)), "sync_offset_ms": 0, "contacts": contacts, "gripper": gripper,
+           "imu": ap100, "imu_hz": 100, "signal": "finger opening (cm)"}
+    shutil.copy(overlay, PUB / f"ep_{eid}_overlay.mp4")
+    pub["overlay"] = f"/files/ep_{eid}_overlay.mp4"
+    if twin:
+        shutil.copy(twin, PUB / f"ep_{eid}_twin.mp4")
+        pub["twin"] = f"/files/ep_{eid}_twin.mp4"
+    (PUB / f"ep_{eid}.json").write_text(json.dumps(pub))
+    publish_index()
+    step("done (video only)")
+    return pub
+
+
 def process(eid: str) -> dict:
+    if not (RAW / f"{eid}.parquet").exists():
+        return process_video_only(eid)
     from contact_detect import UI_KIND, detect_contacts
 
     meta = episode_meta(eid)
@@ -227,7 +292,8 @@ def sim_twin(eid: str, aligned_p: Path, task: str) -> Path | None:
 def publish_index() -> None:
     """episode_<i>.json (Episode screen rail order) + dataset_stats.json."""
     eps = []
-    for i, eid in enumerate([e for e in raw_episodes() if (PUB / f"ep_{e}.json").exists()]):
+    ids = sorted({p.stem[3:] for p in PUB.glob("ep_*.json")})
+    for i, eid in enumerate(ids):
         d = json.loads((PUB / f"ep_{eid}.json").read_text())
         (PUB / f"episode_{i}.json").write_text(json.dumps(d))
         eps.append({"n": i, "id": eid, "task": d["task"], "duration": d["duration"]})
@@ -260,6 +326,8 @@ def publish_index() -> None:
 # --------------------------------------------------------------------------- multiply
 def multiply(eid: str, n: int, render_n: int, seed: int = 42) -> None:
     from sim.augment import run_augment
+    if not (RAW / f"{eid}.parquet").exists() and (HANDS / f"{eid}_hands.parquet").exists() and find_video(eid):
+        return multiply_video(eid, n, render_n, seed)
     src = ALIGNED / f"{eid}.parquet"
     if not src.exists():
         src = RAW / f"{eid}.parquet"
@@ -283,6 +351,26 @@ def multiply(eid: str, n: int, render_n: int, seed: int = 42) -> None:
         metrics()
     except Exception as e:
         print("metrics failed:", e, flush=True)
+
+
+def multiply_video(eid: str, n: int, render_n: int, seed: int = 42) -> None:
+    """Video-only take: every variant replays the exact 3D hand copy; physics decides OK / SLIP."""
+    import cv2
+    from sim.augment import run_augment
+    video = find_video(eid)
+    cap = cv2.VideoCapture(str(video))
+    w, h = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    cap.release()
+    for sub in ("episodes", "videos"):
+        if (SIM / sub).exists():
+            shutil.rmtree(SIM / sub)
+    step(f"multiply {eid} (exact hand copy) x{n}")
+    print(f'PROGRESS {{"done": 0, "total": {n}, "ok": 0, "slip": 0}}', flush=True)
+    run_augment(str(HANDS / f"{eid}_hands.parquet"), n=n, render_n=render_n, out_dir=str(SIM), lerobot_out=None,
+                task="pick up cup", seed=seed,
+                exact={"hands_parquet": str(HANDS / f"{eid}_hands.parquet"), "video_path": str(video), "width": w, "height": h})
+    publish_variants()
+    publish_index()
 
 
 def publish_variants() -> None:

@@ -142,7 +142,7 @@
   M.on('hand', d => { hand = d.joints; hands2 = null; });
   let hands2 = null;   // live MediaPipe result: array of 21-joint hands in canvas-normalized coords
   M.on('status', s => {
-    connected = !!s.wrist; root.classList.toggle('disc', !connected);
+    connected = !!s.wrist; root.classList.remove('disc');  // video-only product: no wrist overlay
     $('rc-hz').textContent = s.wrist ? Math.round(s.hz) : '—'; $('rc-neps').textContent = s.episodes;
     $('rc-livetxt').textContent = s.camera ? (recOn ? 'REC' : 'LIVE') : 'NO CAMERA';
   });
