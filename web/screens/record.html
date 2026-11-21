@@ -1,0 +1,229 @@
+<section id="scr-record" class="screen">
+  <div class="rc-grid">
+    <!-- LEFT: camera panel -->
+    <div class="rc-panel rc-cam real">
+      <div class="rc-head"><svg viewBox="0 0 16 16"><rect x="1.5" y="4" width="13" height="9" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="8" cy="8.5" r="2.4" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>
+        <span class="rc-title">Chest cam · first person</span><span class="rc-tag real">REAL</span><span class="rc-sp"></span><span class="rc-meta mono" id="rc-fps">30 fps · 1080p</span><span class="rc-icons"><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.2" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M6.2 6.3a1.9 1.9 0 1 1 2.6 1.7c-.6.3-.8.6-.8 1.2M8 11.4v.2" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg><svg viewBox="0 0 16 16"><path d="M1.5 8S4 3.5 8 3.5 14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8Z" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="8" cy="8" r="2" fill="currentColor"/></svg><svg viewBox="0 0 16 16"><path d="M9.5 2h4.5v4.5M6.5 14H2V9.5M14 2 9 7M2 14l5-5" fill="none" stroke="currentColor" stroke-width="1.3"/></svg></span></div>
+      <div class="rc-body">
+        <!-- WIRE: replace canvas with <video> src = camera MJPEG/MP4 (GET /files/episode_overlay.mp4) or getUserMedia -->
+        <video id="rc-video" muted playsinline hidden></video>
+        <canvas id="rc-cam" width="1152" height="740"></canvas>
+        <div class="rc-live"><i></i><span id="rc-livetxt">LIVE</span></div>
+      </div>
+    </div>
+    <!-- RIGHT -->
+    <div class="rc-right">
+      <div class="rc-panel rc-imu">
+        <div class="rc-head"><svg viewBox="0 0 16 16"><path d="M1.5 9.5 4 9.5 5.5 4 8 13 10 7 11.5 9.5 14.5 9.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>
+          <span class="rc-title">Wrist IMU · |a|</span><span class="rc-tag real">REAL</span><span class="rc-sp"></span><span class="rc-meta mono">5 s window</span><span class="rc-icons"><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.2" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M6.2 6.3a1.9 1.9 0 1 1 2.6 1.7c-.6.3-.8.6-.8 1.2M8 11.4v.2" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg><svg viewBox="0 0 16 16"><path d="M1.5 8S4 3.5 8 3.5 14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8Z" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="8" cy="8" r="2" fill="currentColor"/></svg><svg viewBox="0 0 16 16"><path d="M9.5 2h4.5v4.5M6.5 14H2V9.5M14 2 9 7M2 14l5-5" fill="none" stroke="currentColor" stroke-width="1.3"/></svg></span></div>
+        <div class="rc-body"><canvas id="rc-plot" width="766" height="408"></canvas><div class="rc-legend"><span><i style="background:var(--real)"></i>|a|</span><span><i style="background:var(--ev-grab)"></i>GRAB</span><span><i style="background:var(--ev-tap)"></i>TAP</span><span><i style="background:var(--ev-slip)"></i>SLIP</span><span><i style="background:var(--ev-setdown)"></i>SET-DOWN</span></div></div>
+      </div>
+      <div class="rc-panel rc-sel">
+        <div class="rc-head"><span class="rc-title caps">Selection</span><span class="rc-sp"></span><span class="rc-meta">wrist iPhone</span></div>
+        <div class="rc-selbody">
+          <div class="rc-orient"><div class="rc-scene"><div class="rc-phone" id="rc-phone"><i></i></div></div><div class="rc-axis mono">q = <span id="rc-q">1 0 0 0</span></div></div>
+          <div class="rc-kv">
+            <div class="rc-row"><span class="k">|a|</span><span class="v mono"><b id="rc-a">9.81</b><u>m/s²</u></span></div>
+            <div class="rc-row"><span class="k">gyro</span><span class="v mono"><b id="rc-g">0.00</b><u>rad/s</u></span></div>
+            <div class="rc-row"><span class="k">rate</span><span class="v mono"><b id="rc-hz">100</b><u>Hz</u></span></div>
+            <div class="rc-row small"><span class="k">last contact</span><span class="v mono" id="rc-last">none yet</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- BOTTOM: controls -->
+    <div class="rc-ctrl">
+      <label class="rc-task"><span class="caps">Task</span>
+        <select id="rc-task"><option>Pick up cup</option><option>Pour</option><option>Open drawer</option></select></label>
+      <button id="rc-rec" type="button"><i class="rc-dot"></i><span id="rc-rectxt">RECORD</span></button>
+      <div class="rc-hint"><span class="mono clap"><svg viewBox="0 0 24 24"><path d="M7 11 4.5 8.5M10 8 8.5 5M14 8l1.5-3M17 11l2.5-2.5M6 14c0 4 3 7 6.5 7s6-3 6-7l-2-4-2.5 3-3-6-3 6-2-1.5z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/></svg>×3</span><span>Clap 3× to sync</span></div>
+      <span class="rc-sp"></span>
+      <div class="rc-clock mono"><span>timestamp</span><b id="rc-clock">00:00:00</b><span>1.00x</span></div>
+      <div class="rc-counts mono"><span>events <b id="rc-nev">0</b></span><span>episodes <b id="rc-neps">0</b></span></div>
+    </div>
+    <!-- disconnected overlay (wrist) -->
+    <div class="rc-off" id="rc-off"><div><div class="rc-offt">Wrist phone disconnected</div>
+      <div class="rc-offh">Reconnect: open <b>Sensor Logger</b>, push to <span class="mono" id="rc-ip">&lt;mac-ip&gt;:8000</span></div></div></div>
+  </div>
+</section>
+<style>
+#scr-record{--rc-h:36px}
+#scr-record *{box-sizing:border-box}
+#scr-record .rc-grid{position:absolute;inset:0;padding:12px;background:var(--bg)}
+#scr-record .rc-grid::after{content:"";position:absolute;inset:0;border:2px solid transparent;pointer-events:none;border-radius:2px;transition:border-color var(--t-med)}
+#scr-record.recording .rc-grid::after{border-color:var(--slip);animation:rcb 1.2s ease-in-out infinite}
+@keyframes rcb{50%{border-color:rgba(255,77,94,.25)}}
+#scr-record .rc-panel{position:absolute;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden}
+#scr-record .rc-cam{left:12px;top:12px;width:1152px;height:784px;border-color:var(--real)}
+#scr-record .rc-right{position:absolute;left:1176px;top:12px;width:732px}
+#scr-record .rc-imu{left:0;top:0;width:732px;height:452px}
+#scr-record .rc-sel{left:0;top:464px;width:732px;height:320px}
+#scr-record .rc-head{height:44px;display:flex;align-items:center;gap:10px;padding:0 14px;background:var(--surface-2);border-bottom:1px solid var(--line);font-size:var(--fs-md);color:var(--text)}
+#scr-record .rc-head svg{width:20px;height:20px;color:var(--text-muted)}
+#scr-record .rc-sp{flex:1}
+#scr-record .rc-meta{font-size:var(--fs-sm);color:var(--text-muted)}
+#scr-record .caps{text-transform:uppercase;letter-spacing:var(--tracking-caps);font-size:var(--fs-sm);font-weight:600;color:var(--text-muted)}
+#scr-record .rc-tag{font-size:var(--fs-xs);font-weight:700;letter-spacing:var(--tracking-caps);padding:2px 8px;border-radius:var(--r-sm)}
+#scr-record .rc-tag.real{background:var(--real-soft);color:var(--real)}
+#scr-record .rc-body{position:relative;height:calc(100% - 44px)}
+#scr-record canvas{display:block;width:100%;height:100%}
+#scr-record .rc-live{position:absolute;left:16px;top:16px;display:flex;align-items:center;gap:8px;padding:6px 12px;border-radius:var(--r-sm);background:rgba(11,13,16,.7);font-family:var(--font-mono);font-size:var(--fs-sm);color:var(--text)}
+#scr-record .rc-live i{width:10px;height:10px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 4px var(--ok-soft)}
+#scr-record.recording .rc-live i{background:var(--slip);box-shadow:0 0 0 4px var(--slip-soft);animation:rcp 1s infinite}
+@keyframes rcp{50%{opacity:.3}}
+#scr-record .rc-selbody{display:flex;height:calc(100% - 44px)}
+#scr-record .rc-orient{width:250px;border-right:1px solid var(--line);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px}
+#scr-record .rc-scene{width:150px;height:190px;perspective:600px;display:grid;place-items:center}
+#scr-record .rc-phone{width:76px;height:150px;border:3px solid var(--real);border-radius:14px;background:var(--real-soft);transform-style:preserve-3d;position:relative;transition:transform 60ms linear}
+#scr-record .rc-phone i{position:absolute;left:50%;top:8px;width:22px;height:5px;margin-left:-11px;border-radius:3px;background:var(--real)}
+#scr-record .rc-axis{font-size:var(--fs-xs);color:var(--text-muted)}
+#scr-record .rc-kv{flex:1;padding:6px 20px;display:flex;flex-direction:column;justify-content:center}
+#scr-record .rc-row{display:flex;align-items:baseline;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--line)}
+#scr-record .rc-row:last-child{border:0}
+#scr-record .k{font-size:var(--fs-md);color:var(--text-muted)}
+#scr-record .v b{font-size:var(--fs-xl);font-weight:500;color:var(--real);letter-spacing:-.02em}
+#scr-record .v u{text-decoration:none;font-size:var(--fs-sm);color:var(--text-muted);margin-left:8px}
+#scr-record .row.small .v,#scr-record .rc-row.small .v{font-size:var(--fs-md);color:var(--text)}
+#scr-record .rc-ctrl{position:absolute;left:12px;right:12px;top:808px;height:144px;display:flex;align-items:center;gap:32px;padding:0 28px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-md)}
+#scr-record .rc-task{display:flex;flex-direction:column;gap:8px}
+#scr-record select{height:56px;min-width:300px;padding:0 16px;background:var(--surface-2);color:var(--text);border:1px solid var(--line-strong);border-radius:var(--r-md);font:500 var(--fs-lg) var(--font-ui)}
+#scr-record #rc-rec{display:flex;align-items:center;gap:20px;height:96px;min-width:380px;padding:0 40px;border-radius:var(--r-lg);border:2px solid var(--slip);background:var(--slip-soft);color:var(--text);font:600 40px var(--font-ui);letter-spacing:.06em;cursor:pointer;justify-content:center;transition:background var(--t-fast)}
+#scr-record #rc-rec:hover{background:rgba(255,77,94,.28)}
+#scr-record .rc-dot{width:36px;height:36px;border-radius:50%;background:var(--slip)}
+#scr-record.recording #rc-rec{background:var(--slip);color:var(--on-accent);font-family:var(--font-mono);font-size:56px;letter-spacing:0}
+#scr-record.recording .rc-dot{width:28px;height:28px;background:var(--on-accent);border-radius:4px}
+#scr-record .rc-hint{display:flex;align-items:center;gap:16px;font-size:var(--fs-lg);color:var(--text-muted)}
+#scr-record .rc-hint .clap{font-size:var(--fs-lg);padding:6px 14px;border:1px solid var(--line-strong);border-radius:var(--r-md);color:var(--real)}
+#scr-record .rc-counts{display:flex;gap:32px;font-size:var(--fs-md);color:var(--text-muted)}
+#scr-record .rc-counts b{color:var(--text);font-weight:500;font-size:var(--fs-lg);margin-left:6px}
+#scr-record .rc-off{position:absolute;left:12px;top:12px;width:1896px;height:784px;display:none;place-items:center;text-align:center;background:rgba(20,24,29,.93);border-radius:var(--r-md);z-index:5}
+#scr-record.disc .rc-off{display:grid}
+#scr-record .rc-offt{font-size:var(--fs-hero);font-size:64px;font-weight:600;color:var(--text-muted);margin-bottom:24px}
+#scr-record .rc-offh{font-size:var(--fs-lg);color:var(--text-muted)}
+#scr-record .rc-offh b{color:var(--text)} #scr-record .rc-offh .mono{color:var(--real)}
+#scr-record .rc-icons{display:flex;gap:16px;margin-left:16px;color:var(--text-muted)}
+#scr-record .rc-icons svg{width:20px;height:20px}
+#scr-record .rc-legend{position:absolute;left:68px;bottom:44px;padding:8px 14px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-md);display:flex;flex-direction:column;gap:2px;font-size:var(--fs-sm);color:var(--text)}
+#scr-record .rc-legend span{display:flex;align-items:center;gap:10px}
+#scr-record .rc-legend i{width:10px;height:10px;border-radius:50%}
+#scr-record .rc-clock{display:flex;align-items:center;gap:16px;font-size:var(--fs-md);color:var(--text-muted)}
+#scr-record .rc-clock b{font-weight:500;color:var(--text);padding:8px 16px;border:1px solid var(--line-strong);border-radius:var(--r-sm);font-size:var(--fs-lg)}
+#scr-record .rc-ctrl{border-top:2px solid var(--line-strong)}
+#scr-record .rc-hint .clap svg{width:30px;height:30px;vertical-align:middle;margin-right:6px}
+</style>
+<script>
+(() => { const init = () => {
+  const root = document.getElementById('scr-record');
+  const $ = id => document.getElementById(id);
+  const css = getComputedStyle(document.documentElement);
+  const V = n => css.getPropertyValue(n).trim();
+  const C = { real: V('--real'), text: V('--text'), muted: V('--text-muted'), line: V('--line'), line2: V('--line-strong'), bg: V('--surface'), dim: V('--text-dim'),
+    ev: { GRAB: V('--ev-grab'), TAP: V('--ev-tap'), SLIP: V('--ev-slip'), 'SET-DOWN': V('--ev-setdown') }, mono: V('--font-mono') };
+  const font = (px, w) => (w || 400) + ' ' + px + 'px ' + C.mono;
+
+  /* ---- state ---- */
+  const buf = [];           // {t,a}
+  const evs = [];           // {t,kind,wall}
+  let lastT = 0, lastWall = performance.now(), hand = null, nev = 0, ymax = 20, connected = true;
+  M.on('imu', d => {
+    buf.push({ t: d.t, a: d.a }); if (buf.length > 900) buf.shift();
+    lastT = d.t; lastWall = performance.now();
+    $('rc-a').textContent = d.a.toFixed(2); $('rc-g').textContent = d.g.toFixed(2);
+    if (d.q) {
+      $('rc-q').textContent = d.q.map(x => x.toFixed(2)).join(' ');
+      const [w, x, y, z] = d.q, n = Math.hypot(w, x, y, z) || 1, a = w / n, b = x / n, c = y / n, e = z / n;
+      const r = [[1-2*(c*c+e*e), 2*(b*c-a*e), 2*(b*e+a*c)], [2*(b*c+a*e), 1-2*(b*b+e*e), 2*(c*e-a*b)], [2*(b*e-a*c), 2*(c*e+a*b), 1-2*(b*b+c*c)]];
+      const s = [1, -1, -1], m = (i, j) => (r[i][j] * s[i] * s[j]).toFixed(4);   // flip to CSS y-down
+      $('rc-phone').style.transform = `rotateX(-18deg) rotateY(24deg) matrix3d(${m(0,0)},${m(1,0)},${m(2,0)},0,${m(0,1)},${m(1,1)},${m(2,1)},0,${m(0,2)},${m(1,2)},${m(2,2)},0,0,0,0,1)`;
+    }
+  });
+  M.on('contact', d => { evs.push({ t: d.t, kind: d.kind, wall: performance.now() }); if (evs.length > 40) evs.shift(); nev++; $('rc-nev').textContent = nev;
+    const l = $('rc-last'); l.textContent = d.kind; l.style.color = C.ev[d.kind] || C.text; });
+  M.on('hand', d => { hand = d.joints; });
+  M.on('status', s => {
+    connected = !!s.wrist; root.classList.toggle('disc', !connected);
+    $('rc-hz').textContent = s.wrist ? Math.round(s.hz) : '—'; $('rc-neps').textContent = s.episodes;
+    $('rc-livetxt').textContent = s.camera ? (recOn ? 'REC' : 'LIVE') : 'NO CAMERA';
+  });
+  $('rc-ip').textContent = (location.hostname || '<mac-ip>') + ':8000';
+
+  /* ---- plot (Rerun style: grid, ticks, cursor) ---- */
+  const pc = $('rc-plot'), px = pc.getContext('2d');
+  function drawPlot() {
+    const W = pc.width, H = pc.height, L = 56, R = 14, T = 14, B = 34, pw = W - L - R, ph = H - T - B;
+    px.clearRect(0, 0, W, H);
+    const now = lastT + Math.min((performance.now() - lastWall) / 1000, .2), t0 = now - 5;
+    let pk = 0; for (const s of buf) if (s.t >= t0 && s.a > pk) pk = s.a;
+    const target = Math.max(20, Math.ceil(pk * 1.15 / 5) * 5); ymax += (target - ymax) * .08;
+    const X = t => L + (t - t0) / 5 * pw, Y = a => T + ph - a / ymax * ph;
+    px.lineWidth = 1; px.font = font(14); px.textBaseline = 'middle'; px.textAlign = 'right';
+    const step = ymax > 30 ? 10 : 5;
+    for (let a = 0; a <= ymax; a += step) { const y = Math.round(Y(a)) + .5; px.strokeStyle = C.line; px.beginPath(); px.moveTo(L, y); px.lineTo(L + pw, y); px.stroke(); px.fillStyle = C.muted; px.fillText(a, L - 8, y); }
+    px.textAlign = 'center'; px.textBaseline = 'top';
+    for (let s = Math.ceil(t0); s <= now; s++) { const x = Math.round(X(s)) + .5; px.strokeStyle = C.line; px.beginPath(); px.moveTo(x, T); px.lineTo(x, T + ph); px.stroke(); px.fillStyle = C.muted; px.fillText((s - now).toFixed(0) + ' s', x, T + ph + 8); }
+    px.strokeStyle = C.line2; px.strokeRect(L + .5, T + .5, pw, ph);
+    // events
+    px.save(); px.beginPath(); px.rect(L, T, pw, ph); px.clip();
+    const tnow = performance.now(); let row = 0;
+    for (const e of evs) {
+      if (e.t < t0) continue; const x = Math.round(X(e.t)) + .5, col = C.ev[e.kind] || C.text, age = tnow - e.wall;
+      if (age < 400) { px.globalAlpha = (1 - age / 400) * .35; px.fillStyle = col; px.fillRect(x - 14, T, 28, ph); }
+      px.globalAlpha = 1; px.strokeStyle = col; px.lineWidth = 2; px.beginPath(); px.moveTo(x, T); px.lineTo(x, T + ph); px.stroke();
+    }
+    // line
+    px.strokeStyle = C.real; px.lineWidth = 2.5; px.lineJoin = 'round'; px.beginPath(); let st = false;
+    for (const s of buf) { if (s.t < t0 - .1) continue; const x = X(s.t), y = Y(Math.min(s.a, ymax)); st ? px.lineTo(x, y) : px.moveTo(x, y); st = true; }
+    px.stroke(); px.restore();
+    // chips
+    px.font = font(16, 600); px.textAlign = 'left'; px.textBaseline = 'middle'; row = 0;
+    for (const e of evs) {
+      if (e.t < t0) continue; const x = X(e.t), col = C.ev[e.kind] || C.text, w = px.measureText(e.kind).width + 16, cx = Math.min(x + 4, L + pw - w);
+      const cy = T + 6 + (row++ % 2) * 28; px.fillStyle = col; px.beginPath(); px.roundRect(cx, cy, w, 24, 4); px.fill();
+      px.fillStyle = V('--on-accent'); px.fillText(e.kind, cx + 8, cy + 13);
+    }
+    // cursor (Rerun time cursor at "now")
+    px.strokeStyle = C.text; px.lineWidth = 1.5; const cxp = L + pw - .5; px.beginPath(); px.moveTo(cxp, T); px.lineTo(cxp, T + ph); px.stroke();
+    px.fillStyle = C.text; px.beginPath(); px.moveTo(cxp - 7, T - 1); px.lineTo(cxp + 7, T - 1); px.lineTo(cxp, T + 9); px.fill();
+    px.fillStyle = C.muted; px.font = font(14); px.save(); px.translate(14, T + ph / 2); px.rotate(-Math.PI / 2); px.textAlign = 'center'; px.fillText('m/s²', 0, 0); px.restore();
+  }
+
+  /* ---- camera + skeleton ---- */
+  const cc = $('rc-cam'), cx = cc.getContext('2d'), CH = [1, 5, 9, 13, 17];
+  function drawCam(ts) {
+    const W = cc.width, H = cc.height, t = ts / 1000;
+    // WIRE: if video.readyState>=2 -> cx.drawImage(video,0,0,W,H) instead of the placeholder below
+    const g = cx.createLinearGradient(0, 0, W, H); g.addColorStop(0, '#171b21'); g.addColorStop(1, '#0d1014'); cx.fillStyle = g; cx.fillRect(0, 0, W, H);
+    cx.strokeStyle = 'rgba(255,255,255,.05)'; cx.lineWidth = 1; cx.beginPath(); for (let y = 0; y < H; y += 60) { cx.moveTo(0, y + .5); cx.lineTo(W, y + .5); } cx.stroke();
+    cx.fillStyle = 'rgba(255,255,255,.07)'; cx.fillRect(W * .12 + Math.sin(t * .3) * 20, H * .52, 300, 160);   // table
+    cx.fillStyle = 'rgba(255,255,255,.12)'; cx.beginPath(); cx.roundRect(W * .66 + Math.sin(t * .7) * 30, H * .46, 90, 120, 10); cx.fill(); // cup
+    cx.fillStyle = V('--text-dim'); cx.font = font(18); cx.textAlign = 'right'; cx.textBaseline = 'bottom'; cx.fillText('chest-cam placeholder', W - 16, H - 14);
+    if (hand) {
+      const P = j => [j[0] * W, j[1] * H];
+      cx.strokeStyle = C.real; cx.lineWidth = 4; cx.lineCap = 'round'; cx.shadowColor = C.real; cx.shadowBlur = 10; cx.beginPath();
+      for (const s of CH) { let p = P(hand[0]); cx.moveTo(p[0], p[1]); for (let k = 0; k < 4; k++) { p = P(hand[s + k]); cx.lineTo(p[0], p[1]); } }
+      cx.stroke(); cx.shadowBlur = 0; cx.fillStyle = C.real;
+      hand.forEach((j, i) => { const p = P(j); cx.beginPath(); cx.arc(p[0], p[1], i === 0 ? 9 : 6, 0, 7); cx.fill(); });
+    }
+  }
+  function frame(ts) { if (root.classList.contains('on')) { drawPlot(); drawCam(ts); } requestAnimationFrame(frame); }
+  requestAnimationFrame(frame);
+
+  /* ---- controls ---- */
+  let recOn = false, recT0 = 0;
+  const btn = $('rc-rec'), txt = $('rc-rectxt'), fmt = s => String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(Math.floor(s % 60)).padStart(2, '0');
+  async function post(path, body) {
+    try { await fetch((M.api || '') + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) }); } catch (e) { /* offline demo */ }
+  }
+  btn.addEventListener('click', () => {
+    recOn = !recOn; root.classList.toggle('recording', recOn);
+    if (recOn) { recT0 = performance.now(); txt.textContent = '00:00'; $('rc-livetxt').textContent = 'REC';
+      if (!window.MIMESIS_DEMO) post('/episode/start', { task: $('rc-task').value }); // WIRE: POST /episode/start {task}
+    } else { txt.textContent = 'RECORD'; $('rc-livetxt').textContent = 'LIVE';
+      if (!window.MIMESIS_DEMO) post('/episode/stop'); // WIRE: POST /episode/stop
+    }
+    M.emit('rec', { on: recOn, t0: recT0 / 1000 });
+  });
+  setInterval(() => { $('rc-clock').textContent = new Date().toTimeString().slice(0,8); if (recOn) txt.textContent = fmt((performance.now() - recT0) / 1000); }, 250);
+  // WIRE: GET /status -> M.emit('status'); GET /latest -> M.emit('imu'/'hand'/'contact') when !MIMESIS_DEMO
+}; window.M ? init() : addEventListener('DOMContentLoaded', init); })();
+</script>

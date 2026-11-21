@@ -1,0 +1,320 @@
+<section id="scr-ship" class="screen">
+  <!-- header (HF dataset header: title + pill rows + tab row) -->
+  <div class="hd">
+    <div class="title"><span class="ds">Datasets:</span> <span class="org">mimesis/</span><span class="nm mono">pick-up-cup</span>
+      </div>
+    <div class="pills">
+      <span class="lb">Tasks:</span><span class="pill"><i class="ic" style="--c:var(--real)"></i>Robotics</span>
+      <span class="lb">Modalities:</span>
+      <span class="pill"><i class="ic" style="--c:var(--real)"></i>Video</span>
+      <span class="pill"><i class="ic" style="--c:var(--ev-tap)"></i>IMU</span>
+      <span class="pill"><i class="ic" style="--c:var(--real)"></i>Hand joints</span>
+      <span class="pill"><i class="ic" style="--c:var(--sim)"></i>Contact forces</span>
+      <span class="pill"><i class="ic" style="--c:var(--ok)"></i>Labels</span>
+      <span class="lb">Format:</span><span class="pill">LeRobot v3</span>
+      <span class="lb">Size:</span><span class="pill mono" id="sh-sizepill">1K - 10K</span>
+    </div>
+    <div class="tabs"><span class="on">Dataset card</span><span>Data Studio</span><span>Files and versions</span><span>Community</span></div>
+  </div>
+
+  <div class="main">
+    <!-- hero metric: biggest thing on screen, reveals last -->
+    <div class="card hero" id="sh-hero">
+      <div class="ch"><b>Proof</b><span class="tag"><i class="sw sim"></i>Trained on simulation only</span><span class="dot">·</span><span class="tag"><i class="sw real"></i>tested on real wrist data</span><span class="wire mono">/files/metrics.json</span></div>
+      <div class="hbody">
+        <div class="hm"><div class="big mono sim" id="sh-acc">--%</div><div class="cap">Contact accuracy</div></div>
+        <div class="hm"><div class="big mono sim" id="sh-auc">AUC --</div><div class="cap">Area under ROC, GRAB / TAP / SLIP / SET-DOWN</div></div>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="card chart">
+        <div class="ch"><b>Sim-trained vs baselines</b><span class="sub">accuracy on held-out real wrist data</span></div>
+        <svg id="sh-bars" viewBox="0 0 700 330" preserveAspectRatio="xMidYMid meet"></svg>
+      </div>
+      <div class="card drift">
+        <div class="ch"><b>Why not just use the IMU?</b></div>
+        <svg id="sh-drift" viewBox="0 0 440 262" preserveAspectRatio="xMidYMid meet">
+          <g class="grid"></g>
+          <path id="sh-dcam" pathLength="1" class="cam" d="" />
+          <path id="sh-dimu" pathLength="1" class="imu" d="" />
+          <g id="sh-dend" style="opacity:0"><line id="sh-derrl" class="errl" x1="0" y1="0" x2="0" y2="0"/><circle id="sh-dc1" r="6" class="c1"/><circle id="sh-dc2" r="6" class="c2"/><text id="sh-derr" class="errt mono"></text></g>
+          <g class="leg"><line x1="14" y1="236" x2="40" y2="236" class="cam"/><text x="48" y="241">Camera, true path</text><line x1="220" y1="236" x2="246" y2="236" class="imu"/><text x="254" y="241">IMU, double-integrated</text></g>
+        </svg>
+        <div class="cap2">Double integration turns IMU noise into <b class="mono" id="sh-derrbig">0.0 m</b> of drift in 10 s.</div>
+      </div>
+    </div>
+  </div>
+
+  <aside class="side">
+    <div class="btns">
+      <button class="b primary" id="sh-export">Export to LeRobot</button>
+      <button class="b outline" id="sh-push">Push to Hugging Face</button>
+      <button class="b ghost" id="sh-open">Open folder</button>
+    </div>
+    <div class="msg" id="sh-msg" aria-live="polite">&nbsp;</div>
+    <div class="sec"><div class="stl">Dataset card</div>
+      <div class="stat"><span>Episodes, real</span><b class="mono real" id="sh-er">0</b></div>
+      <div class="stat"><span>Episodes, simulated</span><b class="mono sim" id="sh-es">0</b></div>
+      <div class="stat"><span>Frames</span><b class="mono" id="sh-fr">0</b></div>
+      <div class="stat"><span>Hours of data</span><b class="mono" id="sh-hr">0.0</b></div>
+      <div class="stat"><span>Total size</span><b class="mono" id="sh-sz">0 MB</b></div>
+      <div class="stat"><span>Format</span><b class="mono">LeRobot v3</b></div>
+    </div>
+    <div class="sec mini">
+      <div class="mc"><span>Homepage</span><b>mimesis.ai</b></div>
+      <div class="mc"><span>Robot</span><b>Parallel gripper</b></div>
+      <div class="mc"><span>License</span><b>cc-by-4.0</b></div>
+      <div class="mc"><span>Sim engine</span><b>MuJoCo</b></div>
+      <div class="mc"><span>Sample rate</span><b class="mono">100 Hz IMU</b></div>
+      <div class="mc"><span>Camera</span><b class="mono">30 fps</b></div>
+    </div>
+    <div class="sec"><div class="stl">Trainable with</div>
+      <div class="mod"><b class="mono">lerobot/act</b><span>Robotics</span></div>
+      <div class="mod"><b class="mono">lerobot/smolvla</b><span>Robotics</span></div>
+    </div>
+  </aside>
+</section>
+
+<style>
+#scr-ship{background:var(--bg);color:var(--text);font-family:var(--font-ui);font-size:var(--fs-md)}
+#scr-ship .mono{font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+#scr-ship .sim{color:var(--sim)} #scr-ship .real{color:var(--real)}
+#scr-ship .hd{position:absolute;left:0;top:0;width:1920px;height:178px;background:var(--surface);border-bottom:1px solid var(--line);padding:20px 56px 0}
+#scr-ship .title{display:flex;align-items:center;gap:var(--sp-3);font-size:var(--fs-lg);font-weight:600;height:40px}
+#scr-ship .title .ds{color:var(--text-muted)} #scr-ship .title .org{color:var(--text-muted);font-weight:400;margin-left:-6px}
+#scr-ship .title .nm{font-weight:600;font-size:var(--fs-lg)}
+#scr-ship .chip{margin-left:var(--sp-3);font-size:var(--fs-sm);font-weight:400;color:var(--text-muted);border:1px solid var(--line-strong);border-radius:var(--r-md);padding:4px 12px}
+#scr-ship .chip b{color:var(--text);font-weight:500;margin-left:6px}
+#scr-ship .chip.like{margin-left:20px}
+#scr-ship .pills{display:flex;align-items:center;gap:var(--sp-2);margin-top:var(--sp-4);height:36px;white-space:nowrap}
+#scr-ship .lb{color:var(--text-muted);font-size:var(--fs-sm);margin:0 2px 0 var(--sp-3)}
+#scr-ship .lb:first-child{margin-left:0}
+#scr-ship .pill{display:inline-flex;align-items:center;gap:8px;height:34px;padding:0 12px;border:1px solid var(--line-strong);border-radius:var(--r-md);background:var(--surface-2);font-size:var(--fs-sm)}
+#scr-ship .ic{width:12px;height:12px;border-radius:3px;background:var(--c)}
+#scr-ship .tabs{position:absolute;left:56px;bottom:0;display:flex;gap:var(--sp-6);font-size:var(--fs-md);color:var(--text-muted)}
+#scr-ship .tabs span{padding:0 4px 12px;border-bottom:2px solid transparent}
+#scr-ship .tabs .on{color:var(--text);font-weight:600;border-color:var(--text)}
+
+#scr-ship .main{position:absolute;left:56px;top:196px;width:1180px;height:752px;display:flex;flex-direction:column;gap:var(--sp-4)}
+#scr-ship .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-md)}
+#scr-ship .ch{display:flex;align-items:center;gap:var(--sp-3);height:48px;padding:0 var(--sp-4);border-bottom:1px solid var(--line);background:var(--surface-2);border-radius:var(--r-md) var(--r-md) 0 0;font-size:var(--fs-md)}
+#scr-ship .ch b{font-weight:600} #scr-ship .sub{color:var(--text-muted);font-size:var(--fs-sm)}
+#scr-ship .ch .wire{margin-left:auto;font-size:var(--fs-xs);color:var(--text-muted)}
+#scr-ship .tag{display:inline-flex;align-items:center;gap:8px;font-size:var(--fs-md);color:var(--text)}
+#scr-ship .sw{width:12px;height:12px;border-radius:50%} #scr-ship .sw.sim{background:var(--sim)} #scr-ship .sw.real{background:var(--real)}
+#scr-ship .dot{color:var(--text-muted)}
+#scr-ship .hero{height:300px;border-color:var(--sim);box-shadow:0 0 0 1px var(--sim-soft),0 0 60px var(--sim-soft)}
+#scr-ship .hbody{display:flex;height:252px;align-items:center;padding:0 var(--sp-6);gap:var(--sp-6)}
+#scr-ship .hm{flex:1}
+#scr-ship .big{font-size:var(--fs-hero);font-weight:700;line-height:1;letter-spacing:-.02em;white-space:nowrap}
+#scr-ship .hm:last-child .big{font-size:var(--fs-hero)}
+#scr-ship .cap{margin-top:var(--sp-3);color:var(--text-muted);font-size:var(--fs-md)}
+#scr-ship .hero.pop .big{animation:sh-pop 600ms var(--ease)}
+@keyframes sh-pop{0%{transform:scale(.94);filter:brightness(1.8)}100%{transform:none;filter:none}}
+#scr-ship .hero:not(.shown) .big{opacity:.35}
+#scr-ship .row{display:flex;gap:var(--sp-4);flex:1;min-height:0}
+#scr-ship .chart{width:700px;display:flex;flex-direction:column}
+#scr-ship .drift{width:464px;display:flex;flex-direction:column}
+#scr-ship .chart svg,#scr-ship .drift svg{flex:1;min-height:0;width:100%;padding:var(--sp-3)}
+#scr-ship svg text{font-family:var(--font-ui);fill:var(--text-muted);font-size:14px}
+#scr-ship .bv{font-family:var(--font-mono);font-size:28px;font-weight:700;fill:var(--text)}
+#scr-ship .bl{fill:var(--text);font-size:16px}
+#scr-ship .ax{stroke:var(--line-strong);stroke-width:1} #scr-ship .gl{stroke:var(--line);stroke-width:1}
+#scr-ship .grid line{stroke:var(--line);stroke-width:1}
+#scr-ship path.cam,#scr-ship line.cam{stroke:var(--real);stroke-width:4;fill:none;stroke-linecap:round}
+#scr-ship path.imu,#scr-ship line.imu{stroke:var(--text-muted);stroke-width:3;fill:none;stroke-dasharray:9 7;stroke-linecap:round}
+#scr-ship path.cam,#scr-ship path.imu{stroke-dasharray:none}
+#scr-ship path.imu{stroke-dasharray:none}
+#scr-ship .errl{stroke:var(--slip);stroke-width:2;stroke-dasharray:4 4}
+#scr-ship .c1{fill:var(--real)} #scr-ship .c2{fill:var(--text-muted)}
+#scr-ship .errt{fill:var(--slip);font-size:28px;font-weight:700}
+#scr-ship .leg text{font-size:14px;fill:var(--text)}
+#scr-ship .cap2{padding:0 var(--sp-4) var(--sp-4);font-size:var(--fs-sm);color:var(--text-muted)}
+#scr-ship .cap2 b{color:var(--slip);font-weight:700}
+
+#scr-ship .side{position:absolute;left:1292px;top:196px;width:572px;height:752px;display:flex;flex-direction:column;gap:var(--sp-4)}
+#scr-ship .btns{display:flex;gap:var(--sp-2)}
+#scr-ship .b{white-space:nowrap;height:52px;border-radius:var(--r-md);font:600 var(--fs-sm) var(--font-ui);cursor:pointer;padding:0 var(--sp-2);transition:filter var(--t-fast),background var(--t-fast)}
+#scr-ship .b.primary{flex:1.1;background:var(--sim);color:var(--on-accent);border:1px solid var(--sim)}
+#scr-ship .b.outline{flex:1.4;background:var(--surface-2);color:var(--text);border:1px solid var(--line-strong)}
+#scr-ship .b.ghost{flex:.9;background:transparent;color:var(--text-muted);border:1px solid transparent}
+#scr-ship .b:hover{filter:brightness(1.15)} #scr-ship .b.ghost:hover{background:var(--surface-2);color:var(--text)}
+#scr-ship .msg{min-height:20px;margin:-6px 0 -4px;font-size:var(--fs-sm);color:var(--ok)}
+#scr-ship .sec{border-top:1px solid var(--line);padding-top:var(--sp-4)}
+#scr-ship .stl{font-size:var(--fs-sm);color:var(--text-muted);text-transform:uppercase;letter-spacing:var(--tracking-caps);margin-bottom:var(--sp-2)}
+#scr-ship .stat{display:flex;justify-content:space-between;align-items:baseline;height:44px;border-bottom:1px solid var(--line);font-size:var(--fs-md);color:var(--text-muted)}
+#scr-ship .stat b{font-size:var(--fs-lg);font-weight:600;color:var(--text)}
+#scr-ship .stat b.real{color:var(--real)} #scr-ship .stat b.sim{color:var(--sim)}
+#scr-ship .mini{display:grid;grid-template-columns:1fr 1fr 1fr;gap:var(--sp-2)}
+#scr-ship .mc{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-md);padding:10px 12px;font-size:var(--fs-xs);color:var(--text-muted)}
+#scr-ship .mc b{display:block;margin-top:4px;font-size:var(--fs-sm);font-weight:500;color:var(--text);white-space:nowrap}
+#scr-ship .mod{display:flex;justify-content:space-between;align-items:center;height:48px;margin-bottom:var(--sp-2);padding:0 var(--sp-3);background:var(--surface);border:1px solid var(--line);border-radius:var(--r-md);font-size:var(--fs-sm)}
+#scr-ship .mod span{color:var(--text-muted);font-size:var(--fs-xs)}
+</style>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id), css = n => getComputedStyle($('scr-ship')).getPropertyValue(n).trim();
+  const NS = 'http://www.w3.org/2000/svg';
+  // WIRE: GET /files/metrics.json -> {acc, auc, bars:{baseline,real,sim,simreal}, drift_m}
+  // WIRE: GET /files/dataset_stats.json -> {episodes_real, episodes_sim, frames, hours, size_mb}
+  // placeholder values until backend exists:
+  let metrics = { acc: 87, auc: 0.93, bars: { baseline: 58, real: 74, sim: 87, simreal: 93 }, drift_m: 3.8 };
+  let stats = { episodes_real: 12, episodes_sim: 1200, frames: 1456000, hours: 13.5, size_mb: 2840 };
+  const fmt = {
+    int: v => Math.round(v).toLocaleString('en-US'),
+    d1: v => v.toFixed(1), d2: v => v.toFixed(2),
+    mb: v => Math.round(v).toLocaleString('en-US') + ' MB'
+  };
+  const ease = t => 1 - Math.pow(1 - t, 3);
+  let token = 0;
+  function count(el, to, dur, f, token0, pre = '', post = '') {
+    const t0 = performance.now();
+    (function step(n) {
+      if (token0 !== token) return;
+      const p = Math.min(1, (n - t0) / dur);
+      el.textContent = pre + f(to * ease(p)) + post;
+      if (p < 1) requestAnimationFrame(step);
+    })(t0);
+  }
+
+  // ---- bar chart ----
+  const bars = [
+    { k: 'baseline', l: 'Baseline', s: 'IMU threshold', c: '--text-dim' },
+    { k: 'real', l: 'Real-only', s: 'trained on real', c: '--real' },
+    { k: 'sim', l: 'Sim-only', s: 'zero real labels', c: '--sim' },
+    { k: 'simreal', l: 'Sim + Real', s: 'fine-tuned', c: '--sim', mix: true }
+  ];
+  const X0 = 56, Y0 = 40, H = 220, W = 580, BW = 96;
+  function el(tag, a, p) { const e = document.createElementNS(NS, tag); for (const k in a) e.setAttribute(k, a[k]); (p || $('sh-bars')).appendChild(e); return e; }
+  const barEls = [];
+  function buildBars() {
+    const svg = $('sh-bars'); svg.innerHTML = '';
+    const defs = el('defs', {});
+    const g = el('linearGradient', { id: 'sh-mix', x1: 0, y1: 0, x2: 0, y2: 1 }, defs);
+    el('stop', { offset: '0', 'stop-color': css('--sim') }, g); el('stop', { offset: '.75', 'stop-color': css('--sim') }, g); el('stop', { offset: '.75', 'stop-color': css('--real') }, g);
+    [0, 50, 100].forEach(v => {
+      const y = Y0 + H - H * v / 100;
+      el('line', { x1: X0, x2: X0 + W, y1: y, y2: y, class: v ? 'gl' : 'ax' });
+      const t = el('text', { x: X0 - 12, y: y + 5, 'text-anchor': 'end' }); t.textContent = v + '%';
+    });
+    barEls.length = 0;
+    bars.forEach((b, i) => {
+      const cx = X0 + 40 + i * ((W - 80) / 3) , x = cx - BW / 2 + 0;
+      const r = el('rect', { x, y: Y0 + H, width: BW, height: 0, rx: 4, fill: b.mix ? 'url(#sh-mix)' : css(b.c) });
+      const v = el('text', { x: cx, y: Y0 + H - 10, 'text-anchor': 'middle', class: 'bv', opacity: 0 }); v.textContent = '0%';
+      const l = el('text', { x: cx, y: Y0 + H + 30, 'text-anchor': 'middle', class: 'bl' }); l.textContent = b.l;
+      const s = el('text', { x: cx, y: Y0 + H + 52, 'text-anchor': 'middle' }); s.textContent = b.s;
+      barEls.push({ r, v, b, cx });
+    });
+  }
+  function growBars(tk) {
+    barEls.forEach((o, i) => {
+      const to = metrics.bars[o.b.k], t0 = performance.now() + i * 140;
+      (function step(n) {
+        if (tk !== token) return;
+        const p = Math.max(0, Math.min(1, (n - t0) / 700)), val = to * ease(p), h = H * val / 100;
+        o.r.setAttribute('y', Y0 + H - h); o.r.setAttribute('height', h);
+        o.v.setAttribute('y', Y0 + H - h - 12); o.v.setAttribute('opacity', p > 0 ? 1 : 0); o.v.textContent = Math.round(val) + '%';
+        if (o.b.k === 'sim') o.v.style.fill = css('--sim');
+        if (p < 1) requestAnimationFrame(step);
+      })(performance.now());
+    });
+  }
+
+  // ---- drift plot: top-down path, 10 s. DEMO: synthetic. WIRE: GET /files/metrics.json.drift {cam:[[x,y]..], imu:[[x,y]..]} ----
+  const PX = 28, PY = 18, PW = 384, PH = 196;
+  function buildDrift() {
+    const grid = document.querySelector('#sh-drift .grid'); grid.innerHTML = '';
+    for (let i = 0; i <= 4; i++) { const x = PX + PW * i / 4, y = PY + PH * i / 4; [[x, PY, x, PY + PH], [PX, y, PX + PW, y]].forEach(a => { const l = document.createElementNS(NS, 'line'); ['x1', 'y1', 'x2', 'y2'].forEach((k, j) => l.setAttribute(k, a[j])); grid.appendChild(l); }); }
+    const N = 100, cam = [], imu = [];
+    for (let i = 0; i <= N; i++) {
+      const u = i / N, t = u * 10;
+      const x = .08 + .62 * u + .06 * Math.sin(u * 9), y = .5 + .30 * Math.sin(u * 5.5) * (1 - .3 * u);
+      cam.push([x, y]);
+      const e = Math.pow(u, 2.1);              // quadratic-ish drift growth
+      imu.push([x + e * .22 + .01 * Math.sin(t * 5) * u, y - e * .34 + .01 * Math.cos(t * 4) * u]);
+    }
+    const P = a => a.map((p, i) => (i ? 'L' : 'M') + (PX + p[0] * PW).toFixed(1) + ' ' + (PY + p[1] * PH).toFixed(1)).join(' ');
+    $('sh-dcam').setAttribute('d', P(cam)); $('sh-dimu').setAttribute('d', P(imu));
+    const a = cam[N], b = imu[N];
+    const ax = PX + a[0] * PW, ay = PY + a[1] * PH, bx = PX + b[0] * PW, by = PY + b[1] * PH;
+    $('sh-dc1').setAttribute('cx', ax); $('sh-dc1').setAttribute('cy', ay); $('sh-dc2').setAttribute('cx', bx); $('sh-dc2').setAttribute('cy', by);
+    const l = $('sh-derrl'); l.setAttribute('x1', ax); l.setAttribute('y1', ay); l.setAttribute('x2', bx); l.setAttribute('y2', by);
+    const t = $('sh-derr'); t.setAttribute('x', Math.min(bx, ax) - 12); t.setAttribute('y', Math.min(by, ay) + 4); t.setAttribute('text-anchor', 'end');
+  }
+  function drawDrift(tk) {
+    const A = $('sh-dcam'), B = $('sh-dimu'), E = $('sh-dend'), t0 = performance.now();
+    [A, B].forEach(p => { p.style.strokeDasharray = 1; p.style.strokeDashoffset = 1; });
+    E.style.opacity = 0; $('sh-derr').textContent = '';
+    (function step(n) {
+      if (tk !== token) return;
+      const p = Math.min(1, (n - t0) / 1400);
+      A.style.strokeDashoffset = 1 - ease(p); B.style.strokeDashoffset = 1 - ease(p);
+      $('sh-derrbig').textContent = (metrics.drift_m * ease(p)).toFixed(1) + ' m';
+      if (p < 1) requestAnimationFrame(step); else {
+        B.style.strokeDasharray = ''; B.style.strokeDashoffset = '';
+        B.setAttribute('class', 'imu'); B.style.strokeDasharray = '9 7';
+        E.style.opacity = 1; $('sh-derr').textContent = metrics.drift_m.toFixed(1) + ' m';
+      }
+    })(t0);
+  }
+
+  // ---- reveal ----
+  function reset() {
+    token++;
+    $('sh-hero').classList.remove('shown', 'pop');
+    $('sh-acc').textContent = '--%'; $('sh-auc').textContent = 'AUC --';
+    ['sh-er', 'sh-es', 'sh-fr'].forEach(i => $(i).textContent = '0'); $('sh-hr').textContent = '0.0'; $('sh-sz').textContent = '0 MB';
+    $('sh-derrbig').textContent = '0.0 m';
+    buildBars(); buildDrift();
+    document.querySelectorAll('#sh-dcam,#sh-dimu').forEach(p => { p.style.strokeDasharray = 1; p.style.strokeDashoffset = 1; });
+    $('sh-dend').style.opacity = 0;
+  }
+  async function loadData() {
+    // WIRE: GET /files/metrics.json and /files/dataset_stats.json (M.api + path); fall back to placeholders above
+    try {
+      const [m, s] = await Promise.all(['/files/metrics.json', '/files/dataset_stats.json'].map(u => fetch((M.api || '') + u).then(r => { if (!r.ok) throw 0; return r.json(); })));
+      metrics = Object.assign(metrics, m); stats = Object.assign(stats, s);
+    } catch (e) { /* demo placeholders */ }
+  }
+  async function reveal() {
+    reset();
+    await loadData();
+    const tk = token;
+    // 1. dataset stats count up
+    count($('sh-er'), stats.episodes_real, 900, fmt.int, tk); count($('sh-es'), stats.episodes_sim, 1200, fmt.int, tk);
+    count($('sh-fr'), stats.frames, 1400, fmt.int, tk); count($('sh-hr'), stats.hours, 1200, fmt.d1, tk); count($('sh-sz'), stats.size_mb, 1200, fmt.mb, tk);
+    document.querySelector('#scr-ship .like b').textContent = '0';
+    $('sh-sizepill').textContent = stats.episodes_sim + stats.episodes_real >= 1000 ? '1K - 10K' : '100 - 1K';
+    // 2. bars, 3. drift, 4. hero last
+    setTimeout(() => tk === token && growBars(tk), 400);
+    setTimeout(() => tk === token && drawDrift(tk), 1300);
+    setTimeout(() => {
+      if (tk !== token) return;
+      const h = $('sh-hero'); h.classList.add('shown', 'pop');
+      count($('sh-acc'), metrics.acc, 1300, v => Math.round(v), tk, '', '%');
+      count($('sh-auc'), metrics.auc, 1300, v => v.toFixed(2), tk, 'AUC ', '');
+    }, 3000);
+  }
+  M.on('screen', id => { if (id === 'ship') reveal(); });
+
+  // ---- buttons ----
+  const say = (t, ok = true) => { const m = $('sh-msg'); m.textContent = t; m.style.color = ok ? css('--ok') : css('--slip'); };
+  async function post(path, body, okMsg) {
+    say('Working...'); $('sh-msg').style.color = css('--text-muted');
+    if (window.MIMESIS_DEMO) { await new Promise(r => setTimeout(r, 900)); return say(okMsg); }
+    try { const r = await fetch((M.api || '') + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) }); if (!r.ok) throw 0; say(okMsg); }
+    catch (e) { say('Request failed: ' + path, false); }
+  }
+  // WIRE: POST /export  -> writes LeRobot v3 dataset folder
+  $('sh-export').onclick = () => post('/export', { format: 'lerobot_v3' }, 'Exported LeRobot v3 dataset');
+  // WIRE: POST /export/push  -> push_to_hub mimesis/pick-up-cup
+  $('sh-push').onclick = () => post('/export/push', { repo: 'mimesis/pick-up-cup' }, 'Pushed to huggingface.co/mimesis/pick-up-cup');
+  // WIRE: POST /export/open  -> opens the dataset folder in Finder
+  $('sh-open').onclick = () => post('/export/open', {}, 'Opened dataset folder');
+
+  reset();
+})();
+</script>

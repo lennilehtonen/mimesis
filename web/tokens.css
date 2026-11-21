@@ -1,0 +1,64 @@
+/* MIMESIS tokens. The ONLY place colors, fonts and scale live. UI and deck both read this file.
+   Roles follow the anchor (Rerun viewer): near-black bg, slightly lighter panels, 1px lines. */
+@import url("fonts/fonts.css");
+
+:root {
+  /* surfaces */
+  --bg: #0B0D10;          /* page background */
+  --surface: #14181D;     /* panels, cards */
+  --surface-2: #1A2027;   /* panel headers, hover, inputs */
+  --line: #232A33;        /* 1px borders */
+  --line-strong: #323B47;
+
+  /* text */
+  --text: #E8EDF2;
+  --text-muted: #8C98A6;  /* >= 4.5:1 on --surface */
+  --text-dim: #5E6A78;    /* only for >= 24px or decorative */
+
+  /* signature: real vs simulated. Use EVERYWHERE consistently. */
+  --real: #FFB547;        /* human / real data: amber */
+  --real-soft: rgba(255, 181, 71, .14);
+  --sim: #3EE6FF;         /* simulated: electric cyan */
+  --sim-soft: rgba(62, 230, 255, .12);
+  --on-accent: #0B0D10;   /* text on amber/cyan fills */
+
+  /* status */
+  --ok: #3DDC84;
+  --ok-soft: rgba(61, 220, 132, .14);
+  --slip: #FF4D5E;
+  --slip-soft: rgba(255, 77, 94, .16);
+
+  /* contact event tints */
+  --ev-grab: #FF7AD9;  /* not amber: amber means "real" */
+  --ev-tap: #B78CFF;
+  --ev-slip: #FF4D5E;
+  --ev-setdown: #3DDC84;
+
+  /* type */
+  --font-ui: "Inter", "Geist", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", "Geist Mono", ui-monospace, Menlo, monospace;
+  --fs-xs: 14px;    /* axis ticks, tiny meta (projector minimum) */
+  --fs-sm: 16px;    /* labels, chips */
+  --fs-md: 20px;    /* body, panel titles */
+  --fs-lg: 28px;    /* section headers, readouts */
+  --fs-xl: 48px;    /* big readouts */
+  --fs-hero: 120px; /* hero metric / counter */
+  --tracking-caps: .08em;
+  --tracking-wordmark: .42em;
+
+  /* shape + spacing (Rerun: tight radii, 1px lines) */
+  --r-sm: 4px;
+  --r-md: 6px;
+  --r-lg: 10px;
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 24px; --sp-6: 32px;
+
+  /* layout (1920x1080 projector) */
+  --topbar-h: 72px;
+  --ticker-h: 44px;
+  --main-h: calc(1080px - var(--topbar-h) - var(--ticker-h)); /* 964px */
+
+  /* motion: subtle */
+  --ease: cubic-bezier(.2, .7, .2, 1);
+  --t-fast: 140ms;
+  --t-med: 320ms;
+}

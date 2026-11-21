@@ -1,0 +1,391 @@
+<section id="scr-episode" class="screen">
+  <aside class="rail">
+    <div class="rail-top">
+      <button class="rail-toggle" title="Collapse rail" aria-label="Collapse rail"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M9 4v16"/></svg></button>
+      <div class="stats">
+        <div><span class="k">Real episodes</span><b class="mono" id="ep-st-eps">6</b></div>
+        <div><span class="k">Frames</span><b class="mono" id="ep-st-frames">2,160</b></div>
+        <div><span class="k">FPS</span><b class="mono" id="ep-st-fps">30</b></div>
+      </div>
+    </div>
+    <div class="rail-h">Episodes</div>
+    <div class="eplist" id="ep-list"></div>
+  </aside>
+
+  <div class="center">
+    <header class="hd">
+      <div class="logo"><svg viewBox="0 0 34 34" width="34" height="34" aria-hidden="true"><rect x="3" y="7" width="17" height="22" rx="8.5" class="lr"/><rect x="13" y="4" width="17" height="22" rx="8.5" class="ls"/></svg></div>
+      <div>
+        <div class="ds">mimesis/real_demo_v1</div>
+        <div class="sub mono">EPISODE <span id="ep-hd-n">0</span> · <span id="ep-hd-task">pick up the cup</span></div>
+      </div>
+    </header>
+
+    <div class="vids">
+      <div class="vp real" id="ep-vp-real">
+        <div class="vh"><span class="dot"></span><b>Real · chest-cam</b><i>REAL</i></div>
+        <div class="vb"><canvas id="ep-cv-real" width="568" height="320"></canvas>
+          <!-- WIRE: GET /files/episode_overlay.mp4 (chest-cam + hand skeleton overlay). Replaces the canvas once it loads. -->
+          <video id="ep-v-real" muted playsinline preload="auto" loop></video></div>
+      </div>
+      <div class="vp sim" id="ep-vp-sim">
+        <div class="vh"><span class="dot"></span><b>Sim · MuJoCo twin</b><i>SIM</i></div>
+        <div class="vb"><canvas id="ep-cv-sim" width="568" height="320"></canvas>
+          <!-- WIRE: GET /files/sim_twin.mp4 (robot replaying the human trajectory). -->
+          <video id="ep-v-sim" muted playsinline preload="auto" loop></video></div>
+      </div>
+    </div>
+
+    <div class="bar">
+      <button class="ib" id="ep-b-start" title="Start"><svg viewBox="0 0 24 24" width="26" height="26" fill="currentColor"><path d="M6 5h2.5v14H6zM19 5v14L9.5 12z"/></svg></button>
+      <button class="ib" id="ep-b-back" title="-1 s"><svg viewBox="0 0 24 24" width="26" height="26" fill="currentColor"><path d="M12 6v12L2.5 12zM21.5 6v12L12 12z"/></svg></button>
+      <button class="ib play" id="ep-b-play" title="Play / pause"></button>
+      <button class="ib" id="ep-b-fwd" title="+1 s"><svg viewBox="0 0 24 24" width="26" height="26" fill="currentColor"><path d="M12 6v12l9.5-6zM2.5 6v12L12 12z"/></svg></button>
+      <button class="ib" id="ep-b-end" title="End"><svg viewBox="0 0 24 24" width="26" height="26" fill="currentColor"><path d="M15.5 5H18v14h-2.5zM5 5v14l9.5-7z"/></svg></button>
+      <div class="scrub" id="ep-scrub"><div class="st"></div><div class="sf" id="ep-sf"></div><div class="th" id="ep-th"></div></div>
+      <div class="tm"><span class="mono big" id="ep-tm">00:00.00</span><span class="mono tot" id="ep-tot">/ 00:12.00</span><span class="mono fr" id="ep-fr">frame 0 / 360</span></div>
+      <label class="spd"><select id="ep-speed"><option value="0.25">0.25×</option><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select></label>
+      <div class="keys"><span><kbd>Space</kbd> play / pause</span><span><kbd>←</kbd><kbd>→</kbd> frame <kbd>Shift</kbd> 1 s</span></div>
+    </div>
+
+    <div class="tracks"><canvas id="ep-cv-tr"></canvas></div>
+  </div>
+
+  <aside class="meta">
+    <div class="mh">Episode metadata</div>
+    <div class="kv"><span class="k">Task</span><b class="v task" id="ep-m-task">—</b></div>
+    <div class="kv"><span class="k">Duration</span><b class="v mono" id="ep-m-dur">—</b></div>
+    <div class="kv"><span class="k">Sync offset</span><b class="v mono" id="ep-m-sync">—</b></div>
+    <div class="kv"><span class="k">Contacts detected</span><b class="v mono" id="ep-m-con">—</b></div>
+    <div class="kv"><span class="k">Frames</span><b class="v mono" id="ep-m-fr">—</b></div>
+    <div class="mh sm">Contact log</div>
+    <div class="clog" id="ep-clog"></div>
+  </aside>
+</section>
+
+<style>
+#scr-episode{--rail-w:300px;display:none;background:var(--bg)}
+#scr-episode.on{display:flex}
+#scr-episode *{box-sizing:border-box}
+#scr-episode .mono{font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+#scr-episode .k{font-size:var(--fs-sm);color:var(--text-muted);letter-spacing:var(--tracking-caps);text-transform:uppercase}
+#scr-episode button{font-family:inherit;cursor:pointer}
+
+/* rail */
+#scr-episode .rail{width:var(--rail-w);flex:none;height:100%;border-right:1px solid var(--line);background:var(--bg);display:flex;flex-direction:column;transition:width var(--t-med) var(--ease);overflow:hidden}
+#scr-episode .rail-top{padding:var(--sp-4);display:flex;gap:var(--sp-3);align-items:flex-start;border-bottom:1px solid var(--line)}
+#scr-episode .rail-toggle{flex:none;width:44px;height:44px;border-radius:var(--r-md);border:1px solid var(--line);background:var(--surface);color:var(--text-muted);display:grid;place-items:center;transition:color var(--t-fast),background var(--t-fast)}
+#scr-episode .rail-toggle:hover{color:var(--text);background:var(--surface-2)}
+#scr-episode .stats{display:flex;flex-direction:column;gap:var(--sp-2);min-width:0;flex:1}
+#scr-episode .stats div{display:flex;justify-content:space-between;align-items:baseline;gap:var(--sp-2);white-space:nowrap}
+#scr-episode .stats .k{font-size:var(--fs-xs)}
+#scr-episode .stats b{font-size:var(--fs-lg);font-weight:500;color:var(--real)}
+#scr-episode .rail-h{padding:var(--sp-4) var(--sp-4) var(--sp-2);font-size:var(--fs-xs);color:var(--text-muted);letter-spacing:var(--tracking-caps);text-transform:uppercase;white-space:nowrap}
+#scr-episode .eplist{flex:1;overflow:hidden;padding:0 var(--sp-3);display:flex;flex-direction:column;gap:var(--sp-1)}
+#scr-episode .ep{display:flex;align-items:center;gap:var(--sp-3);padding:var(--sp-2);border-radius:var(--r-md);border:1px solid transparent;cursor:pointer;color:var(--text);transition:background var(--t-fast)}
+#scr-episode .ep:hover{background:var(--surface)}
+#scr-episode .ep.on{background:var(--real-soft);border-color:var(--real);color:var(--real)}
+#scr-episode .ep canvas{flex:none;width:80px;height:50px;border-radius:var(--r-sm);border:1px solid var(--line-strong);background:var(--surface)}
+#scr-episode .ep .tx{min-width:0;white-space:nowrap}
+#scr-episode .ep .tx b{display:block;font-size:var(--fs-md);font-weight:500}
+#scr-episode .ep .tx span{display:block;font-size:var(--fs-sm);color:var(--text-muted);overflow:hidden;text-overflow:ellipsis}
+#scr-episode .ep.on .tx span{color:var(--text)}
+#scr-episode.collapsed{--rail-w:104px}
+#scr-episode.collapsed .stats,#scr-episode.collapsed .rail-h,#scr-episode.collapsed .ep .tx{display:none}
+#scr-episode.collapsed .rail-top{justify-content:center;padding:var(--sp-4) 0}
+#scr-episode.collapsed .ep{justify-content:center}
+
+/* center */
+#scr-episode .center{flex:1;min-width:0;height:100%;padding:var(--sp-4) var(--sp-5) var(--sp-4);display:flex;flex-direction:column;gap:var(--sp-3)}
+#scr-episode .hd{display:flex;align-items:center;gap:var(--sp-4);height:52px;flex:none}
+#scr-episode .logo{width:72px;height:44px;border-radius:var(--r-md);background:var(--surface);border:1px solid var(--line);display:grid;place-items:center}
+#scr-episode .logo .lr{fill:var(--real)} #scr-episode .logo .ls{fill:none;stroke:var(--sim);stroke-width:2.5}
+#scr-episode .ds{font-size:var(--fs-lg);font-weight:600;line-height:1.1}
+#scr-episode .sub{font-size:var(--fs-sm);color:var(--text-muted);letter-spacing:var(--tracking-caps);margin-top:2px}
+#scr-episode .vids{display:flex;gap:var(--sp-4);flex:none}
+#scr-episode .vp{flex:1;min-width:0;border-radius:var(--r-md);overflow:hidden;background:var(--surface);border:2px solid var(--c)}
+#scr-episode .vp.real{--c:var(--real);--cs:var(--real-soft)} #scr-episode .vp.sim{--c:var(--sim);--cs:var(--sim-soft)}
+#scr-episode .vh{height:38px;display:flex;align-items:center;gap:var(--sp-3);padding:0 var(--sp-3);background:var(--cs);border-bottom:1px solid var(--c)}
+#scr-episode .vh .dot{width:12px;height:12px;border-radius:50%;background:var(--c)}
+#scr-episode .vh b{font-size:var(--fs-md);font-weight:600;color:var(--text)}
+#scr-episode .vh i{margin-left:auto;font-style:normal;font-family:var(--font-mono);font-size:var(--fs-xs);font-weight:700;letter-spacing:var(--tracking-caps);background:var(--c);color:var(--on-accent);padding:2px 8px;border-radius:var(--r-sm)}
+#scr-episode .vb{position:relative;width:100%;aspect-ratio:16/9;background:var(--bg)}
+#scr-episode .vb canvas,#scr-episode .vb video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+#scr-episode .vb video{display:none;background:var(--bg)}
+#scr-episode .vb.live video{display:block}
+
+/* playback bar */
+#scr-episode .bar{flex:none;height:76px;display:flex;align-items:center;gap:var(--sp-3);padding:0 var(--sp-4);background:var(--surface);border:1px solid var(--line-strong);border-radius:var(--r-lg)}
+#scr-episode .ib{width:46px;height:46px;border-radius:var(--r-md);border:1px solid transparent;background:transparent;color:var(--text);display:grid;place-items:center;flex:none;transition:background var(--t-fast)}
+#scr-episode .ib:hover{background:var(--surface-2)}
+#scr-episode .ib.play{width:56px;height:56px;border-color:var(--real);background:var(--real-soft);color:var(--real);margin:0 var(--sp-1)}
+#scr-episode .scrub{position:relative;flex:1;min-width:120px;height:40px;cursor:pointer;touch-action:none}
+#scr-episode .scrub .st{position:absolute;left:0;right:0;top:18px;height:4px;border-radius:2px;background:var(--line-strong)}
+#scr-episode .scrub .sf{position:absolute;left:0;top:18px;height:4px;border-radius:2px;background:var(--real);width:0}
+#scr-episode .scrub .th{position:absolute;top:9px;width:22px;height:22px;margin-left:-11px;border-radius:50%;background:var(--real);box-shadow:0 0 0 5px var(--real-soft)}
+#scr-episode .tm{display:flex;flex-direction:column;align-items:flex-end;flex:none;line-height:1.15}
+#scr-episode .tm .big{font-size:var(--fs-lg);color:var(--text);font-weight:500}
+#scr-episode .tm .tot{font-size:var(--fs-sm);color:var(--text-muted)}
+#scr-episode .tm .fr{display:none}
+#scr-episode .tm{display:grid;grid-template-columns:auto auto;align-items:baseline;column-gap:var(--sp-2)}
+#scr-episode .tm .fr{display:block;grid-column:1/3;text-align:right;font-size:var(--fs-xs);color:var(--text-muted)}
+#scr-episode .spd select{height:44px;padding:0 var(--sp-3);font-family:var(--font-mono);font-size:var(--fs-md);color:var(--text);background:var(--surface-2);border:1px solid var(--line-strong);border-radius:var(--r-md)}
+#scr-episode .keys{display:flex;flex-direction:column;gap:6px;font-size:var(--fs-xs);color:var(--text-muted);white-space:nowrap;flex:none}
+#scr-episode kbd{font-family:var(--font-mono);font-size:var(--fs-xs);color:var(--text);background:var(--surface-2);border:1px solid var(--line-strong);border-radius:var(--r-sm);padding:1px 6px;margin-right:4px}
+
+/* tracks */
+#scr-episode .tracks{flex:1;min-height:0;background:var(--surface);border:1px solid var(--line-strong);border-radius:var(--r-lg);overflow:hidden;position:relative}
+#scr-episode .tracks canvas{position:absolute;inset:0;width:100%;height:100%;cursor:col-resize;touch-action:none}
+
+/* right panel */
+#scr-episode .meta{width:420px;flex:none;height:100%;border-left:1px solid var(--line);padding:var(--sp-5);display:flex;flex-direction:column;gap:var(--sp-4);overflow:hidden}
+#scr-episode .mh{font-size:var(--fs-sm);color:var(--text-muted);letter-spacing:var(--tracking-caps);text-transform:uppercase;padding-bottom:var(--sp-3);border-bottom:1px solid var(--line)}
+#scr-episode .mh.sm{margin-top:var(--sp-2)}
+#scr-episode .kv{display:flex;flex-direction:column;gap:2px}
+#scr-episode .kv .v{font-size:var(--fs-xl);font-weight:500;color:var(--text);line-height:1.1}
+#scr-episode .kv .v.task{font-family:var(--font-ui);font-size:var(--fs-lg);font-weight:600;line-height:1.2;color:var(--real)}
+#scr-episode .kv .v.mono{font-family:var(--font-mono)}
+#scr-episode .clog{display:flex;flex-direction:column;gap:var(--sp-2);flex:1;min-height:0}
+#scr-episode .cl{display:flex;align-items:center;gap:var(--sp-3);height:36px;padding:0 var(--sp-3);border-radius:var(--r-sm);background:var(--surface);border-left:6px solid var(--c);font-size:var(--fs-md);transition:background var(--t-fast)}
+#scr-episode .cl b{font-family:var(--font-mono);font-weight:700;color:var(--c);width:110px}
+#scr-episode .cl span{font-family:var(--font-mono);color:var(--text-muted);font-size:var(--fs-sm)}
+#scr-episode .cl.hit{background:var(--surface-2)}
+</style>
+
+<script>
+(() => {
+  const root = document.getElementById('scr-episode');
+  const $ = id => document.getElementById(id);
+  const css = getComputedStyle(root);
+  const V = n => css.getPropertyValue(n).trim();
+  const FPS = 30;
+  const KIND_VAR = { 'GRAB': '--ev-grab', 'TAP': '--ev-tap', 'SLIP': '--ev-slip', 'SET-DOWN': '--ev-setdown' };
+
+  // ---------- episodes (demo list) ----------
+  // WIRE: GET /files/dataset_stats.json -> {episodes:[{n,task,duration}], frames, fps}; per-episode GET /files/episode_<n>.json
+  const EPS = [
+    { n: 0, task: 'Pick up the cup', dur: 12 }, { n: 1, task: 'Stack two blocks', dur: 12 },
+    { n: 2, task: 'Pour into bowl', dur: 12 }, { n: 3, task: 'Open the drawer', dur: 12 },
+    { n: 4, task: 'Hand over the bottle', dur: 12 }, { n: 5, task: 'Wipe the table', dur: 12 }
+  ];
+  let cur = 0, E = null;          // E = current episode data
+  let t = 0, playing = true, speed = 1, last = performance.now();
+
+  function rnd(seed) { let s = seed * 9301 + 49297; return () => (s = (s * 9301 + 49297) % 233280) / 233280; }
+
+  // fake a 12 s episode with 5 contacts. Used when /files/episode_<n>.json is missing or MIMESIS_DEMO.
+  function demoEpisode(n) {
+    const r = rnd(n + 3);
+    const j = () => (r() - .5) * .3 * (n ? 1 : 0);
+    const contacts = [['GRAB', 2.1], ['TAP', 4.3], ['SLIP', 5.7], ['GRAB', 7.2], ['SET-DOWN', 9.8]].map(([kind, tt]) => ({ kind, t: +(tt + j()).toFixed(2) }));
+    const grabs = contacts.filter(c => c.kind === 'GRAB' || c.kind === 'SET-DOWN');
+    const gripper = [{ t0: 0, t1: contacts[0].t, state: 'open' }, { t0: contacts[0].t, t1: contacts[2].t, state: 'closed' },
+      { t0: contacts[2].t, t1: contacts[3].t, state: 'open' }, { t0: contacts[3].t, t1: contacts[4].t, state: 'closed' }, { t0: contacts[4].t, t1: 12, state: 'open' }];
+    const dur = 12, N = dur * 100, imu = new Float32Array(N);
+    for (let i = 0; i < N; i++) {
+      const tt = i / 100; let a = 9.81 + Math.sin(tt * 1.3 + n) * .7 + Math.sin(tt * 3.1) * .3 + (r() - .5) * .5;
+      contacts.forEach(c => { const d = tt - c.t; if (d > 0 && d < .5) a += Math.exp(-d * 10) * 7 * Math.sin(d * 70) * (c.kind === 'SLIP' ? 1.3 : 1); });
+      imu[i] = a;
+    }
+    return { n, task: EPS[n].task, duration: dur, fps: FPS, frames: dur * FPS, sync_offset_ms: [38, 41, 35, 44, 39, 42][n], contacts, gripper, imu, imu_hz: 100 };
+  }
+
+  async function loadEpisode(n) {
+    let d = null;
+    try { // WIRE: GET /files/episode_<n>.json
+      const r = await fetch((M.api || '') + '/files/episode_' + n + '.json'); if (r.ok) d = await r.json();
+    } catch (e) {}
+    if (d) {
+      d.imu = Float32Array.from(d.imu || []); d.imu_hz = d.imu_hz || 100; d.fps = d.fps || FPS;
+      d.frames = d.frames || Math.round(d.duration * d.fps); d.contacts = d.contacts || []; d.gripper = d.gripper || [];
+      d.task = d.task || EPS[n].task;
+    } else d = demoEpisode(n % EPS.length);
+    d.n = n; return d;
+  }
+
+  const fmtT = s => { s = Math.max(0, s); const m = Math.floor(s / 60), x = Math.floor(s % 60), f = Math.min(FPS - 1, Math.floor((s % 1) * FPS)); return String(m).padStart(2, '0') + ':' + String(x).padStart(2, '0') + '.' + String(f).padStart(2, '0'); };
+
+  async function select(n) {
+    cur = n; const d = await loadEpisode(n); if (cur !== n) return; E = d; t = 0;
+    root.querySelectorAll('.ep').forEach((e, i) => e.classList.toggle('on', i === n));
+    $('ep-hd-n').textContent = n; $('ep-hd-task').textContent = d.task.toLowerCase();
+    $('ep-m-task').textContent = d.task; $('ep-m-dur').textContent = d.duration.toFixed(1) + ' s';
+    $('ep-m-sync').textContent = '+' + d.sync_offset_ms + ' ms'; $('ep-m-con').textContent = d.contacts.length;
+    $('ep-m-fr').textContent = d.frames.toLocaleString('en-US'); $('ep-tot').textContent = '/ ' + fmtT(d.duration);
+    $('ep-clog').innerHTML = d.contacts.map((c, i) => `<div class="cl" data-i="${i}" style="--c:var(${KIND_VAR[c.kind]})"><b>${c.kind}</b><span>${fmtT(c.t)}</span></div>`).join('');
+    // WIRE: per-episode videos; falls back to the canvas placeholder if the file is missing
+    attachVideo('real', '/files/episode_overlay.mp4'); attachVideo('sim', '/files/sim_twin.mp4');
+  }
+
+  // ---------- rail ----------
+  const list = $('ep-list');
+  EPS.forEach((e, i) => {
+    const el = document.createElement('div'); el.className = 'ep';
+    el.innerHTML = `<canvas width="160" height="100"></canvas><div class="tx"><b>Episode ${e.n}</b><span>${e.task}</span></div>`;
+    el.onclick = () => select(i); list.appendChild(el);
+    const c = el.firstChild.getContext('2d'), r = rnd(i + 11);
+    const g = c.createLinearGradient(0, 0, 160, 100); g.addColorStop(0, V('--surface-2')); g.addColorStop(1, V('--bg'));
+    c.fillStyle = g; c.fillRect(0, 0, 160, 100);
+    c.fillStyle = V('--line-strong'); c.fillRect(0, 78, 160, 22);
+    c.fillStyle = V('--real'); c.beginPath(); c.arc(30 + r() * 30, 40 + r() * 20, 11, 0, 7); c.fill();
+    c.strokeStyle = V('--real'); c.lineWidth = 4; c.beginPath(); c.moveTo(40, 55); c.quadraticCurveTo(80, 20 + r() * 40, 110 + r() * 20, 58); c.stroke();
+    c.fillStyle = V('--text-muted'); c.fillRect(100 + r() * 30, 60, 22, 18);
+  });
+  root.querySelector('.rail-toggle').onclick = () => { root.classList.toggle('collapsed'); setTimeout(layout, 360); };
+
+  // ---------- videos ----------
+  const vids = { real: $('ep-v-real'), sim: $('ep-v-sim') };
+  function attachVideo(k, src) {
+    const v = vids[k], box = v.parentNode; box.classList.remove('live');
+    v.onloadeddata = () => box.classList.add('live'); v.onerror = () => box.classList.remove('live');
+    v.src = (M.api || '') + src; v.load();
+  }
+  const live = k => vids[k].parentNode.classList.contains('live') && vids[k].readyState >= 2;
+  function syncVideos() {
+    ['real', 'sim'].forEach(k => {
+      if (!live(k)) return; const v = vids[k];
+      const off = k === 'sim' ? 0 : 0;    // sync offset already baked into episode_overlay.mp4 / sim_twin.mp4
+      if (Math.abs(v.currentTime - (t + off)) > (playing ? .15 : .01)) v.currentTime = t + off;
+      v.playbackRate = speed;
+      if (playing && v.paused) v.play().catch(() => {}); else if (!playing && !v.paused) v.pause();
+    });
+  }
+
+  // ---------- placeholder scenes (same trajectory, amber hand vs cyan gripper) ----------
+  const ss = x => x * x * (3 - 2 * x), cl = (x, a, b) => Math.max(a, Math.min(b, x));
+  function pose(tt) {   // normalized hand position + holding state from episode data
+    const C = E.contacts, tg = C[0].t, tr = C[C.length - 1].t;
+    const A = [.22, .70], B = [.42, .62], D = [.74, .50], R = [.86, .72];
+    const mix = (p, q, u) => [p[0] + (q[0] - p[0]) * ss(cl(u, 0, 1)), p[1] + (q[1] - p[1]) * ss(cl(u, 0, 1)) - Math.sin(Math.PI * cl(u, 0, 1)) * .06];
+    if (tt < tg) return mix(A, B, tt / tg);
+    if (tt < tr) return mix(B, D, (tt - tg) / (tr - tg));
+    return mix(D, R, (tt - tr) / 2);
+  }
+  function closedAt(tt) { const g = E.gripper.find(s => tt >= s.t0 && tt < s.t1); return g && g.state === 'closed'; }
+  function drawScene(cv, kind) {
+    const w = cv.width, h = cv.height, c = cv.getContext('2d'), p = pose(t), x = p[0] * w, y = p[1] * h, held = closedAt(t);
+    const col = V(kind === 'real' ? '--real' : '--sim');
+    const g = c.createLinearGradient(0, 0, w, h); g.addColorStop(0, V('--surface-2')); g.addColorStop(1, V('--bg')); c.fillStyle = g; c.fillRect(0, 0, w, h);
+    c.fillStyle = V('--surface'); c.fillRect(0, h * .78, w, h * .22); c.strokeStyle = V('--line-strong'); c.lineWidth = 1; c.beginPath(); c.moveTo(0, h * .78); c.lineTo(w, h * .78); c.stroke();
+    if (kind === 'sim') { c.strokeStyle = V('--sim-soft'); for (let i = 0; i < w; i += 40) { c.beginPath(); c.moveTo(i, h * .78); c.lineTo(i * 1.0 + (i - w / 2) * .5, h); c.stroke(); } }
+    // object: at start spot until grabbed, follows hand while held, rests at D after set-down
+    const C = E.contacts, tg = C[0].t, tr = C[C.length - 1].t, B = [.42, .62], D = [.74, .50];
+    let ox = (t < tg ? B[0] : t < tr ? p[0] : D[0]) * w, oy = (t < tg ? B[1] : t < tr ? p[1] : D[1]) * h + 26;
+    c.fillStyle = V('--text-muted'); c.fillRect(ox - 20, oy - 20, 40, 40); c.fillStyle = V('--text-dim'); c.fillRect(ox - 20, oy - 20, 40, 8);
+    // flash when a contact fires
+    E.contacts.forEach(ct => { const d = t - ct.t; if (d >= 0 && d < .4) { c.strokeStyle = V(KIND_VAR[ct.kind]); c.globalAlpha = 1 - d / .4; c.lineWidth = 4; c.beginPath(); c.arc(x, y + 20, 30 + d * 120, 0, 7); c.stroke(); c.globalAlpha = 1; } });
+    c.fillStyle = col; c.strokeStyle = col;
+    if (kind === 'real') {                         // amber hand: palm + fingers curl when holding
+      c.beginPath(); c.arc(x, y, 26, 0, 7); c.fill(); c.lineWidth = 7; c.lineCap = 'round';
+      for (let f = -2; f <= 2; f++) { const a = -Math.PI / 2 + f * .28, L = held ? 22 : 40; c.beginPath(); c.moveTo(x + Math.cos(a) * 20, y + Math.sin(a) * 20); c.lineTo(x + Math.cos(a) * (20 + L) * (held ? .8 : 1) + (held ? f * -6 : 0), y + Math.sin(a) * (20 + L) + (held ? 14 : 0)); c.stroke(); }
+      c.lineWidth = 2; c.globalAlpha = .6; c.beginPath(); c.moveTo(x, y + 26); c.lineTo(x - 30, h); c.stroke(); c.globalAlpha = 1;
+    } else {                                      // cyan parallel-jaw gripper, follows state
+      const gap = held ? 22 : 46; c.lineWidth = 9; c.lineCap = 'round';
+      c.beginPath(); c.moveTo(x - gap, y - 30); c.lineTo(x - gap, y + 18); c.moveTo(x + gap, y - 30); c.lineTo(x + gap, y + 18); c.moveTo(x - gap, y - 30); c.lineTo(x + gap, y - 30); c.stroke();
+      c.lineWidth = 12; c.beginPath(); c.moveTo(x, y - 30); c.lineTo(x + 10, 0); c.stroke();
+    }
+    c.fillStyle = V('--text'); c.font = '600 14px ' + V('--font-mono'); c.fillText(kind === 'real' ? 'chest-cam · placeholder' : 'MuJoCo twin · placeholder', 12, h - 12);
+  }
+
+  // ---------- tracks ----------
+  const tc = $('ep-cv-tr'), tctx = tc.getContext('2d');
+  const LBL = 170, PADR = 20;   // label column, right pad
+  let TW = 0, TH = 0, dpr = 1;
+  function layout() {
+    dpr = window.devicePixelRatio || 1; TW = tc.clientWidth; TH = tc.clientHeight;
+    if (!TW) return; tc.width = TW * dpr; tc.height = TH * dpr; tctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  const X = tt => LBL + (tt / E.duration) * (TW - LBL - PADR);
+  function rows() { const top = 36, av = TH - top - 8, a = av * .44, b = av * .26; return { ruler: [0, top], imu: [top, top + a], grip: [top + a, top + a + b], con: [top + a + b, top + av] }; }
+  function drawTracks() {
+    const c = tctx, R = rows(), mono = V('--font-mono');
+    c.clearRect(0, 0, TW, TH);
+    const line = V('--line'), ls = V('--line-strong'), mut = V('--text-muted'), real = V('--real'), sim = V('--sim'), oa = V('--on-accent');
+    // ruler
+    c.font = '500 14px ' + mono; c.fillStyle = mut; c.textBaseline = 'middle'; c.textAlign = 'left';
+    for (let s = 0; s <= E.duration; s++) { const x = X(s); c.strokeStyle = s % 2 ? line : ls; c.beginPath(); c.moveTo(x, s % 2 ? 26 : 20); c.lineTo(x, 36); c.stroke();
+      if (s % 2 === 0 && x + 44 < TW) c.fillText('+' + s + 's', x + 4, 12); }
+    // row separators + labels
+    const lab = [['imu', 'IMU |a|', 'm/s²', real], ['grip', 'GRIPPER', 'sim robot', sim], ['con', 'CONTACTS', 'from IMU', V('--text')]];
+    lab.forEach(([k, a, b, col]) => { const [y0, y1] = R[k]; c.strokeStyle = ls; c.beginPath(); c.moveTo(0, y0 + .5); c.lineTo(TW, y0 + .5); c.stroke();
+      c.fillStyle = col; c.font = '600 16px ' + V('--font-ui'); c.fillText(a, 16, y0 + 24); c.fillStyle = mut; c.font = '400 14px ' + V('--font-ui'); c.fillText(b, 16, y0 + 46); });
+    c.strokeStyle = ls; c.beginPath(); c.moveTo(LBL + .5, 0); c.lineTo(LBL + .5, TH); c.stroke();
+    // vertical grid
+    c.strokeStyle = line; for (let s = 0; s <= E.duration; s += 2) { const x = X(s); c.beginPath(); c.moveTo(x, 36); c.lineTo(x, TH); c.stroke(); }
+    // IMU line (amber = real)
+    { const [y0, y1] = R.imu, pad = 12, lo = 4, hi = 20, Y = a => y1 - pad - (cl(a, lo, hi) - lo) / (hi - lo) * (y1 - y0 - pad * 2), n = E.imu.length, hz = E.imu_hz;
+      c.fillStyle = mut; c.font = '400 14px ' + mono; c.textAlign = 'right'; [[hi, '20'], [12, '12'], [lo, '4']].forEach(([v, s]) => c.fillText(s, LBL - 8, Y(v)));
+      c.textAlign = 'left'; c.beginPath(); const step = Math.max(1, Math.floor(n / (TW * 2)));
+      for (let i = 0; i < n; i += step) { const x = X(i / hz), y = Y(E.imu[i]); i ? c.lineTo(x, y) : c.moveTo(x, y); }
+      c.lineTo(X(n / hz), y1 - pad); c.lineTo(X(0), y1 - pad); c.closePath(); c.fillStyle = V('--real-soft'); c.fill();
+      c.beginPath(); for (let i = 0; i < n; i += step) { const x = X(i / hz), y = Y(E.imu[i]); i ? c.lineTo(x, y) : c.moveTo(x, y); }
+      c.strokeStyle = real; c.lineWidth = 2; c.lineJoin = 'round'; c.stroke(); }
+    // gripper chips (cyan = sim)
+    { const [y0, y1] = R.grip, ch = 40, cy = (y0 + y1) / 2 - ch / 2 + 4;
+      E.gripper.forEach(s => { const x0 = X(s.t0), x1 = X(s.t1), closed = s.state === 'closed';
+        c.fillStyle = closed ? sim : V('--sim-soft'); c.fillRect(x0 + 1, cy, x1 - x0 - 2, ch); c.strokeStyle = sim; c.lineWidth = 1.5; c.strokeRect(x0 + 1.5, cy + .5, x1 - x0 - 3, ch - 1);
+        c.fillStyle = closed ? oa : sim; c.font = '600 16px ' + V('--font-ui'); c.textBaseline = 'middle'; c.fillText(s.state, x0 + 10, cy + ch / 2 + 1); }); }
+    // contact chips
+    { const [y0, y1] = R.con, ch = 40, cy = (y0 + y1) / 2 - ch / 2 + 4;
+      E.contacts.forEach(ct => { const x0 = X(ct.t), w = X(1.15) - X(0), col = V(KIND_VAR[ct.kind]), d = t - ct.t, hot = d >= 0 && d < .4;
+        if (hot) { c.save(); c.shadowColor = col; c.shadowBlur = 22 * (1 - d / .4); }
+        c.fillStyle = col; c.fillRect(x0, cy - (hot ? 3 : 0), w, ch + (hot ? 6 : 0)); if (hot) c.restore();
+        c.fillStyle = oa; c.font = '700 14px ' + mono; c.fillText(ct.kind, x0 + 8, cy + ch / 2 + 1);
+        c.fillStyle = col; c.fillRect(x0, y0 + 4, 2, cy - y0 - 4); }); }
+    // playhead
+    const px = X(t); c.strokeStyle = V('--text'); c.lineWidth = 2; c.beginPath(); c.moveTo(px, 22); c.lineTo(px, TH); c.stroke();
+    c.fillStyle = V('--text'); c.beginPath(); c.moveTo(px - 8, 14); c.lineTo(px + 8, 14); c.lineTo(px, 28); c.closePath(); c.fill();
+  }
+
+  // ---------- transport ----------
+  const playBtn = $('ep-b-play');
+  const ICON = { play: '<svg viewBox="0 0 24 24" width="30" height="30" fill="currentColor"><path d="M7 4.5v15l13-7.5z"/></svg>', pause: '<svg viewBox="0 0 24 24" width="30" height="30" fill="currentColor"><path d="M6 4.5h4.5v15H6zM13.5 4.5H18v15h-4.5z"/></svg>' };
+  function setPlaying(p) { playing = p; playBtn.innerHTML = p ? ICON.pause : ICON.play; last = performance.now(); }
+  function seek(x) { t = cl(x, 0, E.duration - 1e-3); syncVideos(); }
+  playBtn.onclick = () => setPlaying(!playing);
+  $('ep-b-start').onclick = () => seek(0); $('ep-b-end').onclick = () => seek(E.duration);
+  $('ep-b-back').onclick = () => seek(t - 1); $('ep-b-fwd').onclick = () => seek(t + 1);
+  $('ep-speed').onchange = e => { speed = +e.target.value; };
+  function drag(el, toT) {
+    let on = false; const mv = e => { if (on) seek(toT(e)); };
+    el.addEventListener('pointerdown', e => { on = true; el.setPointerCapture(e.pointerId); seek(toT(e)); });
+    el.addEventListener('pointermove', mv); el.addEventListener('pointerup', () => on = false); el.addEventListener('pointercancel', () => on = false);
+  }
+  const sc = $('ep-scrub');
+  drag(sc, e => (e.clientX - sc.getBoundingClientRect().left) / sc.getBoundingClientRect().width * E.duration);
+  drag(tc, e => { const r = tc.getBoundingClientRect(), x = e.clientX - r.left; return (x - LBL) / (TW - LBL - PADR) * E.duration; });
+  addEventListener('keydown', e => {
+    if (!root.classList.contains('on') || e.target.closest('input,select,textarea')) return;
+    const st = e.shiftKey ? 1 : 1 / FPS;
+    if (e.code === 'Space') { e.preventDefault(); setPlaying(!playing); }
+    else if (e.key === 'ArrowLeft') { seek(t - st); setPlaying(false); } else if (e.key === 'ArrowRight') { seek(t + st); setPlaying(false); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); select((cur + EPS.length - 1) % EPS.length); } else if (e.key === 'ArrowDown') { e.preventDefault(); select((cur + 1) % EPS.length); }
+  });
+
+  // ---------- main loop ----------
+  let prevT = 0;
+  function frame(now) {
+    requestAnimationFrame(frame);
+    if (!E || !root.offsetParent) { last = now; return; }
+    if (!TW) layout();
+    const dt = (now - last) / 1000; last = now;
+    if (playing) {
+      const master = live('real') ? vids.real : null;
+      if (master && !master.paused) t = master.currentTime; else t += dt * speed;
+      if (t >= E.duration) { t = 0; if (vids.real.currentTime) vids.real.currentTime = 0; if (vids.sim.currentTime) vids.sim.currentTime = 0; }
+      syncVideos();
+    }
+    if (!live('real')) drawScene($('ep-cv-real'), 'real'); if (!live('sim')) drawScene($('ep-cv-sim'), 'sim');
+    drawTracks();
+    const p = t / E.duration;
+    $('ep-sf').style.width = p * 100 + '%'; $('ep-th').style.left = p * 100 + '%';
+    $('ep-tm').textContent = fmtT(t); $('ep-fr').textContent = 'frame ' + Math.floor(t * E.fps) + ' / ' + E.frames;
+    root.querySelectorAll('.cl').forEach((el, i) => { const d = t - E.contacts[i].t; el.classList.toggle('hit', d >= 0 && d < .4); });
+    prevT = t;
+  }
+  if (window.ResizeObserver) new ResizeObserver(layout).observe(tc.parentNode); else addEventListener('resize', layout);
+  M.on('screen', id => { if (id === 'episode') setTimeout(layout, 30); });
+  setPlaying(true);
+  select(0); requestAnimationFrame(frame);
+})();
+</script>
