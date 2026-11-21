@@ -103,7 +103,7 @@ def process(eid: str) -> dict:
         try:
             step("hands (MediaPipe)")
             from hands import run_hands
-            run_hands(str(video), str(hands_p), str(overlay))
+            run_hands(str(video), str(hands_p), str(overlay), swap_handedness=True)
         except Exception as e:
             print("hands failed:", e, flush=True)
         try:
