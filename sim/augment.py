@@ -176,6 +176,21 @@ def simulate_variant(rt: pd.DataFrame, params: dict, render: bool = False, video
     att = {"on": False, "rel_p": None, "rel_q": None, "ever": False, "dropped": False, "blocked": False,
            "prev_p": None, "prev_v": np.zeros(3), "acc": 0.0}
 
+    CX = rt["cup_x"].to_numpy(float) if "cup_x" in rt else None
+    CY = rt["cup_y"].to_numpy(float) if "cup_y" in rt else None
+
+    def follow_video_cup(tt):
+        """Not held: the cup sits where the real cup is in the video (when it is visible)."""
+        if CX is None or att["dropped"]:
+            return
+        k = int(np.clip(np.searchsorted(t_traj, tt), 0, len(t_traj) - 1))
+        if not (np.isfinite(CX[k]) and np.isfinite(CY[k])):
+            return
+        base_x, base_y = obj_xy[0] - float(base_xy[0]), obj_xy[1] - float(base_xy[1])  # per-variant offset
+        d.qpos[obj_jadr:obj_jadr + 3] = [CX[k] + base_x, CY[k] + base_y, obj_z0]
+        d.qpos[obj_jadr + 3:obj_jadr + 7] = [1.0, 0.0, 0.0, 0.0]
+        d.qvel[obj_dof:obj_dof + 6] = 0.0
+
     def hold_update(tt):
         if not exact:
             return
@@ -186,6 +201,7 @@ def simulate_variant(rt: pd.DataFrame, params: dict, render: bool = False, video
         att["prev_p"], att["prev_v"] = wp, v
         op = d.qpos[obj_jadr:obj_jadr + 3]
         if not closed:
+            follow_video_cup(tt)
             att["blocked"] = False
             if att["on"]:  # human let go: the cup is set down upright where the hand released it
                 att["on"] = False
@@ -194,6 +210,8 @@ def simulate_variant(rt: pd.DataFrame, params: dict, render: bool = False, video
                     d.qpos[obj_jadr + 3:obj_jadr + 7] = [1.0, 0.0, 0.0, 0.0]
                     d.qvel[obj_dof:obj_dof + 6] = 0.0
             return
+        if not att["on"]:
+            follow_video_cup(tt)
         if not att["on"] and not att["blocked"]:
             if np.hypot(*(op[:2] - wp[:2])) < 0.10 and -0.02 < wp[2] - op[2] < 0.16:
                 # snap the object upright into the grip: centred between thumb and fingers, under the palm

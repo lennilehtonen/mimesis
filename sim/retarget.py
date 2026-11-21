@@ -390,13 +390,18 @@ def retarget_exact(hands_df: pd.DataFrame, width: int, height: int, video_path=N
     park_z = 0.25
     # hand out of view inside the take (gap > 0.5 s): open and lift away, like the real hand leaving
     vt = np.interp(t, tf, valid.astype(float)) > 0.5
+    held_gaps = []
     k = 0
     while k < len(t):
         if not vt[k]:
             e = k
             while e + 1 < len(t) and not vt[e + 1]:
                 e += 1
-            if (e - k + 1) / HZ > 0.5 and k > 0 and e < len(t) - 1:
+            holding = k > 0 and (grip[k - 1] - GRIP_OPEN) / (GRIP_CLOSED - GRIP_OPEN) > 0.6
+            if holding:  # hand lost while holding the cup: it still holds it (follows the cup, see below)
+                grip[k:e + 1] = grip[k - 1]
+                held_gaps.append((k, e))
+            elif (e - k + 1) / HZ > 0.5 and k > 0 and e < len(t) - 1:
                 for j in range(k, e + 1):
                     w = min(1.0, min(j - k, e - j) / (0.4 * HZ))
                     P[j, 2] = (1 - w) * P[j, 2] + w * park_z
@@ -454,6 +459,32 @@ def retarget_exact(hands_df: pd.DataFrame, width: int, height: int, video_path=N
         "mocap_qw": quat[:, 0], "mocap_qx": quat[:, 1], "mocap_qy": quat[:, 2], "mocap_qz": quat[:, 3],
         "grip_ctrl": grip,
     })
+    # the real cup, tracked in the video and placed on the same calibrated table (same shift as the hand)
+    if video_path is not None:
+        try:
+            from sim import cup_track
+            ct = cup_track.to_table(cup_track.detect_cups(str(video_path)), table)
+            ok = np.isfinite(ct["cup_x"].to_numpy(float))
+            if ok.sum() >= 5:
+                ctt = ct["t_s"].to_numpy(float)
+                cx = np.interp(t, ctt[ok], ct["cup_x"].to_numpy(float)[ok]) - table_xy[0]
+                cy = np.interp(t, ctt[ok], ct["cup_y"].to_numpy(float)[ok]) - table_xy[1]
+                seen = np.interp(t, ctt, ok.astype(float)) > 0.5
+                out["cup_x"], out["cup_y"] = np.where(seen, cx, np.nan), np.where(seen, cy, np.nan)
+                # hand lost while holding: move the hand with the tracked cup (keep the grip offset)
+                mx, my = out["mocap_x"].to_numpy(float).copy(), out["mocap_y"].to_numpy(float).copy()
+                for k0, k1 in held_gaps:
+                    off = (mx[k0 - 1] - cx[k0 - 1], my[k0 - 1] - cy[k0 - 1])
+                    for j in range(k0, k1 + 1):
+                        if seen[j]:
+                            mx[j], my[j] = cx[j] + off[0], cy[j] + off[1]
+                out["mocap_x"], out["mocap_y"] = mx, my
+                first = int(np.flatnonzero(seen)[0]) if seen.any() else 0
+                obj_xy = [float(cx[first]), float(cy[first])]
+                out.attrs["cup_seen_frac"] = float(ok.mean())
+                print(f"[retarget] cup tracked in {ok.mean():.0%} of frames", file=sys.stderr)
+        except Exception as exc:  # pragma: no cover
+            print(f"[retarget] cup tracking failed ({exc!r})", file=sys.stderr)
     out.attrs["retarget_mode"] = f"exact_{src}"
     out.attrs["object_xy"] = obj_xy
     out.attrs["grasp_xy_table"] = [float(v) for v in table_xy]
