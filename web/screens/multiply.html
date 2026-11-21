@@ -48,8 +48,8 @@
   <footer class="mx-status">
     <span class="mx-dot" id="mx-sdot"></span>
     <span id="mx-stxt">Generated 10 / 10</span>
-    <span class="mx-sep">·</span><span id="mx-ms">3.1 ms/step</span>
-    <span class="mx-sep">·</span><span>GPU</span>
+    <span class="mx-sep">·</span><span id="mx-ms">2 ms physics step</span>
+    <span class="mx-sep">·</span><span>MuJoCo 500 Hz</span>
     <span class="mx-sep">·</span><span id="mx-sgrid">3 x 3 view</span>
     <span class="mx-right"><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg>Sim is healthy</span>
   </footer>
@@ -232,7 +232,7 @@
   let N = 10, n = 3, tiles = [], counter = 10, state = 'done', genCount = 10, t0 = 0;
   const grid = $('mx-grid'), slider = $('mx-slider'), numEl = $('mx-num');
   let cAnim = null;
-  let videoOK = false, labels = null;
+  let videoOK = false, labels = null, labelsVer = Date.now();
   // WIRE: GET /files/variants/labels.json -> [{n,object,mass_g,mu,slip}], videos GET /files/variants/<n>.mp4
   if (window.MIMESIS_DEMO === false || true) fetch((window.M && M.api || '') + '/files/variants/labels.json').then(r => r.ok ? r.json() : null).then(j => { if (Array.isArray(j) && j.length) { labels = j; videoOK = true; if (!window.MIMESIS_DEMO) tiles.forEach((t, k) => land(t, k, true)); } }).catch(() => {});
 
@@ -257,13 +257,13 @@
     t.el.querySelector('.mx-bd').innerHTML = v.slip ? 'SLIP!' : 'OK';
     t.el.querySelector('.mx-idx').textContent = '#' + String(j).padStart(4, '0');
     t.el.querySelector('.mx-lab').innerHTML = `<b>${ob}</b> · ${mass} g · μ ${mu}`;
-    if (videoOK) { t.vid.src = (window.M && M.api || '') + `/files/variants/${j}.mp4`; t.vid.onloadeddata = () => { t.vid.classList.add('on'); t.vid.play().catch(() => {}); }; }
+    if (videoOK && L) { t.vid.preload = 'auto'; t.vid.src = (window.M && M.api || '') + `/files/variants/${j}.mp4?v=${labelsVer}`; t.vid.load(); t.vid.onloadeddata = () => { t.vid.classList.add('on'); t.vid.play().catch(() => {}); }; }
     t.el.classList.add('full');
     if (v.slip && !instant) { t.el.classList.add('flash'); setTimeout(() => t.el.classList.remove('flash'), 420); }
   }
 
   // ---- knobs ----
-  const KN = [['Mass', '0.2–1.5 kg', .1, .75], ['Friction μ', '0.15–0.90', .12, .9], ['Object size', '3–9 cm', .2, .8], ['Position', '±4 cm', .3, .7], ['Time-warp', '0.5×–2×', .15, .85], ['Sensor noise', 'σ 0–5 %', 0, .4]];
+  const KN = [['Mass', '0.12–0.85 kg', .1, .75], ['Friction μ', '0.10–1.05', .08, .95], ['Object size', '0.82–1.18×', .3, .7], ['Position', '±1.5 cm', .4, .6], ['Time-warp', '0.88×–1.15×', .4, .6], ['Sensor noise', 'bias + white', 0, .4]];
   $('mx-knobs').innerHTML = KN.map(k => `<div class="mx-knob"><div class="mx-kt"><span class="mx-kn">${k[0]}<span class="mx-chip">ON</span></span><span class="mx-kv">${k[1]}</span></div><div class="mx-kb"><i style="left:${k[2] * 100}%;width:${(k[3] - k[2]) * 100}%"></i></div></div>`).join('');
   $('mx-knobs').addEventListener('click', e => { const k = e.target.closest('.mx-knob'); if (!k) return; k.classList.toggle('off'); k.querySelector('.mx-chip').textContent = k.classList.contains('off') ? 'OFF' : 'ON'; });
 
@@ -271,7 +271,7 @@
   const thumbs = [];
   for (let i = 0; i < 10; i++) { const d = document.createElement('div'); d.className = 'mx-th'; d.innerHTML = '<canvas width="170" height="68"></canvas><span></span>'; $('mx-thumbs').appendChild(d); thumbs.push({ el: d, g: d.querySelector('canvas').getContext('2d'), sp: d.querySelector('span'), v: null }); }
   function pushThumb(idx) {
-    if (thumbs[0].v && thumbs[0].v.n === idx) return; const v = variant(idx, null); const arr = thumbs.map(t => t.v); arr.unshift(v); arr.length = 10;
+    if (thumbs[0].v && thumbs[0].v.n === idx) return; const v = variant(idx, null); if (labels && labels[idx]) v.slip = !!labels[idx].slip; const arr = thumbs.map(t => t.v); arr.unshift(v); arr.length = 10;
     thumbs.forEach((t, i) => { const q = arr[i]; t.v = q; if (!q) return; t.el.classList.add('full'); t.el.classList.toggle('slip', q.slip); t.sp.textContent = (q.slip ? 'SLIP ' : '') + '#' + q.n; draw(t.g, 170, 68, q, q.slip ? 2.9 : 2.3); });
   }
   for (let i = 9; i >= 0; i--) pushThumb(i);
@@ -335,7 +335,7 @@
   let liveJob = null, liveStart = 0;
   M.on('jobs', js => { if (liveJob && js.multiply && performance.now() - liveStart > 1500) liveJob = js.multiply; });
   function reloadLabels() {
-    return fetch('/files/variants/labels.json?' + Date.now()).then(r => r.ok ? r.json() : null).then(j => { if (Array.isArray(j) && j.length) { labels = j; videoOK = true; } }).catch(() => {});
+    return fetch('/files/variants/labels.json?' + Date.now()).then(r => r.ok ? r.json() : null).then(j => { if (Array.isArray(j) && j.length) { labels = j; videoOK = true; labelsVer = Date.now(); } }).catch(() => {});
   }
   $('mx-gen').addEventListener('click', generate);
   addEventListener('keydown', e => { if (e.target.closest('input,select,textarea,button')) return; if (e.key === 'g' || e.key === 'Enter') { if (root.classList.contains('on')) generate(); } });
@@ -366,13 +366,19 @@
       if (now - lastThumb > 140 && counter > 0) { lastThumb = now; pushThumb(Math.max(0, Math.round(counter) - 1)); }
       drawDonut(counter); genCount = counter; status();
       if (now - lastMs > 180) { lastMs = now; $('mx-ms').textContent = window.MIMESIS_DEMO ? (2.9 + Math.random() * .5).toFixed(1) + ' ms/step' : (counter / Math.max(.1, (now - t0) / 1000)).toFixed(1) + ' variants/s'; }
-      if (p >= 1) { setNum(N); genCount = N; setState('done'); $('mx-genfill').style.width = '0'; drawDonut(N); status(); if (window.MIMESIS_DEMO) $('mx-ms').textContent = '3.1 ms/step'; }
+      if (p >= 1) { setNum(N); genCount = N; setState('done'); $('mx-genfill').style.width = '0'; drawDonut(N); status(); if (window.MIMESIS_DEMO) $('mx-ms').textContent = '2 ms physics step'; }
     } else if (cAnim) {
       const p = Math.min(1, (now - cAnim.st) / cAnim.dur); setNum(Math.round(cAnim.from + (cAnim.to - cAnim.from) * ease(p))); if (p >= 1) cAnim = null;
     }
     tiles.forEach(t => { if (t.full && !t.vid.classList.contains('on')) draw(t.g, 440, 200, t.v, (now / 1000 + t.v.phase) % T); });
   }
   buildGrid(true); paintSlider(); setState('done'); drawDonut(N); status();
+  // live: show the last real run (dataset_stats.json) instead of the demo 10
+  if (!window.MIMESIS_DEMO) fetch('/files/dataset_stats.json?' + Date.now()).then(r => r.json()).then(st => {
+    if (!st.episodes_sim) return; thumbs.forEach(t => t.v = null); for (let i = 9; i >= 0; i--) pushThumb(i);
+    N = genCount = st.episodes_sim; lastLive = { state: 'done', progress: { done: N, total: N, ok: st.sim_ok, slip: st.sim_slip } };
+    slider.value = Math.min(1000, N); paintSlider(); setNum(N); setState('done'); drawDonut(N); status();
+  }).catch(() => {});
   requestAnimationFrame(tick);
 })();
 </script>

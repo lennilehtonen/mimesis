@@ -36,6 +36,9 @@ WEB_DIR = ROOT / "web"
 PUB_DIR = DATA / "web"  # files the dashboard reads under /files
 for d in (OUT_DIR, PUB_DIR, DATA / "videos"):
     d.mkdir(parents=True, exist_ok=True)
+if not (PUB_DIR / "dataset_stats.json").exists():
+    (PUB_DIR / "dataset_stats.json").write_text(json.dumps({"episodes_real": 0, "episodes_sim": 0, "frames": 0,
+                                                           "hours": 0, "size_mb": 0, "fps": 30, "episodes": []}))
 
 SENSOR_ALIASES = {
     "accelerometer": "accel", "linear_acceleration": "accel", "linearacceleration": "accel",

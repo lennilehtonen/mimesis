@@ -3,12 +3,13 @@
 <head>
 <meta charset="utf-8">
 <title>MIMESIS</title>
+<link rel="icon" href="data:,">
 <meta name="viewport" content="width=1920">
 <link rel="stylesheet" href="tokens.css">
 <style>
   /* Shell: top bar + tabs from Rerun viewer top bar (see LAHTEET.md), scaled for projector. */
   *{box-sizing:border-box;margin:0;padding:0}
-  html,body{width:1920px;height:1080px;overflow:hidden;background:var(--bg);color:var(--text);font-family:var(--font-ui);-webkit-font-smoothing:antialiased}
+  html{overflow:hidden;background:var(--bg)} body{width:1920px;height:1080px;overflow:hidden;background:var(--bg);color:var(--text);font-family:var(--font-ui);-webkit-font-smoothing:antialiased}
   .mono{font-family:var(--font-mono);font-variant-numeric:tabular-nums}
 
   #topbar{position:absolute;left:0;top:0;width:1920px;height:var(--topbar-h);display:flex;align-items:center;
@@ -575,6 +576,8 @@ window.M = (() => {
       d.frames = d.frames || Math.round(d.duration * d.fps); d.contacts = d.contacts || []; d.gripper = d.gripper || [];
       d.task = d.task || (EPS[n] || {}).task || 'episode';
     } else d = demoEpisode(n % 6);
+    let mx = 0, mn = 1e9; for (const v of d.imu) { if (v > mx) mx = v; if (v < mn) mn = v; }
+    d.imuLo = mn > 6 ? 4 : 0; d.imuHi = mn > 6 ? 20 : Math.max(4, Math.ceil(mx * 1.1 / 2) * 2);
     d.n = n; return d;
   }
 
@@ -583,6 +586,7 @@ window.M = (() => {
   async function select(n) {
     cur = n; const d = await loadEpisode(n); if (cur !== n) return; E = d; t = 0;
     root.querySelectorAll('.ep').forEach((e, i) => e.classList.toggle('on', i === n));
+    if (!window.MIMESIS_DEMO) { $('ep-st-eps').textContent = EPS.length; $('ep-st-frames').textContent = EPS.reduce((a, e) => a + Math.round((e.dur || 0) * 30), 0).toLocaleString('en-US'); }
     $('ep-hd-n').textContent = n; $('ep-hd-task').textContent = d.task.toLowerCase();
     $('ep-m-task').textContent = d.task; $('ep-m-dur').textContent = d.duration.toFixed(1) + ' s';
     $('ep-m-sync').textContent = '+' + d.sync_offset_ms + ' ms'; $('ep-m-con').textContent = d.contacts.length;
@@ -690,8 +694,8 @@ window.M = (() => {
     // vertical grid
     c.strokeStyle = line; for (let s = 0; s <= E.duration; s += 2) { const x = X(s); c.beginPath(); c.moveTo(x, 36); c.lineTo(x, TH); c.stroke(); }
     // IMU line (amber = real)
-    { const [y0, y1] = R.imu, pad = 12, lo = 4, hi = 20, Y = a => y1 - pad - (cl(a, lo, hi) - lo) / (hi - lo) * (y1 - y0 - pad * 2), n = E.imu.length, hz = E.imu_hz;
-      c.fillStyle = mut; c.font = '400 14px ' + mono; c.textAlign = 'right'; [[hi, '20'], [12, '12'], [lo, '4']].forEach(([v, s]) => c.fillText(s, LBL - 8, Y(v)));
+    { const [y0, y1] = R.imu, pad = 12, lo = E.imuLo, hi = E.imuHi, Y = a => y1 - pad - (cl(a, lo, hi) - lo) / (hi - lo) * (y1 - y0 - pad * 2), n = E.imu.length, hz = E.imu_hz;
+      c.fillStyle = mut; c.font = '400 14px ' + mono; c.textAlign = 'right'; [[hi, String(hi)], [(hi + lo) / 2, String(Math.round((hi + lo) / 2))], [lo, String(lo)]].forEach(([v, s]) => c.fillText(s, LBL - 8, Y(v)));
       c.textAlign = 'left'; c.beginPath(); const step = Math.max(1, Math.floor(n / (TW * 2)));
       for (let i = 0; i < n; i += step) { const x = X(i / hz), y = Y(E.imu[i]); i ? c.lineTo(x, y) : c.moveTo(x, y); }
       c.lineTo(X(n / hz), y1 - pad); c.lineTo(X(0), y1 - pad); c.closePath(); c.fillStyle = V('--real-soft'); c.fill();
@@ -827,8 +831,8 @@ window.M = (() => {
   <footer class="mx-status">
     <span class="mx-dot" id="mx-sdot"></span>
     <span id="mx-stxt">Generated 10 / 10</span>
-    <span class="mx-sep">·</span><span id="mx-ms">3.1 ms/step</span>
-    <span class="mx-sep">·</span><span>GPU</span>
+    <span class="mx-sep">·</span><span id="mx-ms">2 ms physics step</span>
+    <span class="mx-sep">·</span><span>MuJoCo 500 Hz</span>
     <span class="mx-sep">·</span><span id="mx-sgrid">3 x 3 view</span>
     <span class="mx-right"><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg>Sim is healthy</span>
   </footer>
@@ -1011,7 +1015,7 @@ window.M = (() => {
   let N = 10, n = 3, tiles = [], counter = 10, state = 'done', genCount = 10, t0 = 0;
   const grid = $('mx-grid'), slider = $('mx-slider'), numEl = $('mx-num');
   let cAnim = null;
-  let videoOK = false, labels = null;
+  let videoOK = false, labels = null, labelsVer = Date.now();
   // WIRE: GET /files/variants/labels.json -> [{n,object,mass_g,mu,slip}], videos GET /files/variants/<n>.mp4
   if (window.MIMESIS_DEMO === false || true) fetch((window.M && M.api || '') + '/files/variants/labels.json').then(r => r.ok ? r.json() : null).then(j => { if (Array.isArray(j) && j.length) { labels = j; videoOK = true; if (!window.MIMESIS_DEMO) tiles.forEach((t, k) => land(t, k, true)); } }).catch(() => {});
 
@@ -1036,13 +1040,13 @@ window.M = (() => {
     t.el.querySelector('.mx-bd').innerHTML = v.slip ? 'SLIP!' : 'OK';
     t.el.querySelector('.mx-idx').textContent = '#' + String(j).padStart(4, '0');
     t.el.querySelector('.mx-lab').innerHTML = `<b>${ob}</b> · ${mass} g · μ ${mu}`;
-    if (videoOK) { t.vid.src = (window.M && M.api || '') + `/files/variants/${j}.mp4`; t.vid.onloadeddata = () => { t.vid.classList.add('on'); t.vid.play().catch(() => {}); }; }
+    if (videoOK && L) { t.vid.preload = 'auto'; t.vid.src = (window.M && M.api || '') + `/files/variants/${j}.mp4?v=${labelsVer}`; t.vid.load(); t.vid.onloadeddata = () => { t.vid.classList.add('on'); t.vid.play().catch(() => {}); }; }
     t.el.classList.add('full');
     if (v.slip && !instant) { t.el.classList.add('flash'); setTimeout(() => t.el.classList.remove('flash'), 420); }
   }
 
   // ---- knobs ----
-  const KN = [['Mass', '0.2–1.5 kg', .1, .75], ['Friction μ', '0.15–0.90', .12, .9], ['Object size', '3–9 cm', .2, .8], ['Position', '±4 cm', .3, .7], ['Time-warp', '0.5×–2×', .15, .85], ['Sensor noise', 'σ 0–5 %', 0, .4]];
+  const KN = [['Mass', '0.12–0.85 kg', .1, .75], ['Friction μ', '0.10–1.05', .08, .95], ['Object size', '0.82–1.18×', .3, .7], ['Position', '±1.5 cm', .4, .6], ['Time-warp', '0.88×–1.15×', .4, .6], ['Sensor noise', 'bias + white', 0, .4]];
   $('mx-knobs').innerHTML = KN.map(k => `<div class="mx-knob"><div class="mx-kt"><span class="mx-kn">${k[0]}<span class="mx-chip">ON</span></span><span class="mx-kv">${k[1]}</span></div><div class="mx-kb"><i style="left:${k[2] * 100}%;width:${(k[3] - k[2]) * 100}%"></i></div></div>`).join('');
   $('mx-knobs').addEventListener('click', e => { const k = e.target.closest('.mx-knob'); if (!k) return; k.classList.toggle('off'); k.querySelector('.mx-chip').textContent = k.classList.contains('off') ? 'OFF' : 'ON'; });
 
@@ -1050,7 +1054,7 @@ window.M = (() => {
   const thumbs = [];
   for (let i = 0; i < 10; i++) { const d = document.createElement('div'); d.className = 'mx-th'; d.innerHTML = '<canvas width="170" height="68"></canvas><span></span>'; $('mx-thumbs').appendChild(d); thumbs.push({ el: d, g: d.querySelector('canvas').getContext('2d'), sp: d.querySelector('span'), v: null }); }
   function pushThumb(idx) {
-    if (thumbs[0].v && thumbs[0].v.n === idx) return; const v = variant(idx, null); const arr = thumbs.map(t => t.v); arr.unshift(v); arr.length = 10;
+    if (thumbs[0].v && thumbs[0].v.n === idx) return; const v = variant(idx, null); if (labels && labels[idx]) v.slip = !!labels[idx].slip; const arr = thumbs.map(t => t.v); arr.unshift(v); arr.length = 10;
     thumbs.forEach((t, i) => { const q = arr[i]; t.v = q; if (!q) return; t.el.classList.add('full'); t.el.classList.toggle('slip', q.slip); t.sp.textContent = (q.slip ? 'SLIP ' : '') + '#' + q.n; draw(t.g, 170, 68, q, q.slip ? 2.9 : 2.3); });
   }
   for (let i = 9; i >= 0; i--) pushThumb(i);
@@ -1114,7 +1118,7 @@ window.M = (() => {
   let liveJob = null, liveStart = 0;
   M.on('jobs', js => { if (liveJob && js.multiply && performance.now() - liveStart > 1500) liveJob = js.multiply; });
   function reloadLabels() {
-    return fetch('/files/variants/labels.json?' + Date.now()).then(r => r.ok ? r.json() : null).then(j => { if (Array.isArray(j) && j.length) { labels = j; videoOK = true; } }).catch(() => {});
+    return fetch('/files/variants/labels.json?' + Date.now()).then(r => r.ok ? r.json() : null).then(j => { if (Array.isArray(j) && j.length) { labels = j; videoOK = true; labelsVer = Date.now(); } }).catch(() => {});
   }
   $('mx-gen').addEventListener('click', generate);
   addEventListener('keydown', e => { if (e.target.closest('input,select,textarea,button')) return; if (e.key === 'g' || e.key === 'Enter') { if (root.classList.contains('on')) generate(); } });
@@ -1145,13 +1149,19 @@ window.M = (() => {
       if (now - lastThumb > 140 && counter > 0) { lastThumb = now; pushThumb(Math.max(0, Math.round(counter) - 1)); }
       drawDonut(counter); genCount = counter; status();
       if (now - lastMs > 180) { lastMs = now; $('mx-ms').textContent = window.MIMESIS_DEMO ? (2.9 + Math.random() * .5).toFixed(1) + ' ms/step' : (counter / Math.max(.1, (now - t0) / 1000)).toFixed(1) + ' variants/s'; }
-      if (p >= 1) { setNum(N); genCount = N; setState('done'); $('mx-genfill').style.width = '0'; drawDonut(N); status(); if (window.MIMESIS_DEMO) $('mx-ms').textContent = '3.1 ms/step'; }
+      if (p >= 1) { setNum(N); genCount = N; setState('done'); $('mx-genfill').style.width = '0'; drawDonut(N); status(); if (window.MIMESIS_DEMO) $('mx-ms').textContent = '2 ms physics step'; }
     } else if (cAnim) {
       const p = Math.min(1, (now - cAnim.st) / cAnim.dur); setNum(Math.round(cAnim.from + (cAnim.to - cAnim.from) * ease(p))); if (p >= 1) cAnim = null;
     }
     tiles.forEach(t => { if (t.full && !t.vid.classList.contains('on')) draw(t.g, 440, 200, t.v, (now / 1000 + t.v.phase) % T); });
   }
   buildGrid(true); paintSlider(); setState('done'); drawDonut(N); status();
+  // live: show the last real run (dataset_stats.json) instead of the demo 10
+  if (!window.MIMESIS_DEMO) fetch('/files/dataset_stats.json?' + Date.now()).then(r => r.json()).then(st => {
+    if (!st.episodes_sim) return; thumbs.forEach(t => t.v = null); for (let i = 9; i >= 0; i--) pushThumb(i);
+    N = genCount = st.episodes_sim; lastLive = { state: 'done', progress: { done: N, total: N, ok: st.sim_ok, slip: st.sim_slip } };
+    slider.value = Math.min(1000, N); paintSlider(); setNum(N); setState('done'); drawDonut(N); status();
+  }).catch(() => {});
   requestAnimationFrame(tick);
 })();
 </script>
@@ -1401,7 +1411,7 @@ window.M = (() => {
     const ax = PX + a[0] * PW, ay = PY + a[1] * PH, bx = PX + b[0] * PW, by = PY + b[1] * PH;
     $('sh-dc1').setAttribute('cx', ax); $('sh-dc1').setAttribute('cy', ay); $('sh-dc2').setAttribute('cx', bx); $('sh-dc2').setAttribute('cy', by);
     const l = $('sh-derrl'); l.setAttribute('x1', ax); l.setAttribute('y1', ay); l.setAttribute('x2', bx); l.setAttribute('y2', by);
-    const t = $('sh-derr'); t.setAttribute('x', Math.min(bx, ax) - 12); t.setAttribute('y', Math.min(by, ay) + 4); t.setAttribute('text-anchor', 'end');
+    const t = $('sh-derr'), mx = (ax + bx) / 2, my = (ay + by) / 2; t.setAttribute('x', Math.max(PX + 40, Math.min(PX + PW - 40, mx))); t.setAttribute('y', Math.max(PY + 18, Math.min(PY + PH - 6, my - 12))); t.setAttribute('text-anchor', 'middle');
   }
   function drawDrift(tk) {
     const A = $('sh-dcam'), B = $('sh-dimu'), E = $('sh-dend'), t0 = performance.now();
@@ -1445,7 +1455,7 @@ window.M = (() => {
     // 1. dataset stats count up
     count($('sh-er'), stats.episodes_real, 900, fmt.int, tk); count($('sh-es'), stats.episodes_sim, 1200, fmt.int, tk);
     count($('sh-fr'), stats.frames, 1400, fmt.int, tk); count($('sh-hr'), stats.hours, 1200, fmt.d1, tk); count($('sh-sz'), stats.size_mb, 1200, fmt.mb, tk);
-    document.querySelector('#scr-ship .like b').textContent = '0';
+    const lk = document.querySelector('#scr-ship .like b'); if (lk) lk.textContent = '0';
     $('sh-sizepill').textContent = stats.episodes_sim + stats.episodes_real >= 1000 ? '1K - 10K' : '100 - 1K';
     // 2. bars, 3. drift, 4. hero last
     setTimeout(() => tk === token && growBars(tk), 400);
@@ -1488,6 +1498,17 @@ window.M = (() => {
 </footer>
 
 <script>
+/* fit the 1920x1080 stage into any window (laptop screen, projector) */
+(() => {
+  const fit = () => {
+    const k = Math.min(innerWidth / 1920, innerHeight / 1080);
+    document.body.style.transformOrigin = '0 0';
+    document.body.style.transform = k < 0.999 || k > 1.001 ? `translate(${(innerWidth - 1920 * k) / 2}px,0) scale(${k})` : '';
+    document.documentElement.style.background = getComputedStyle(document.body).backgroundColor;
+  };
+  addEventListener('resize', fit); addEventListener('DOMContentLoaded', fit);
+})();
+
 /* tabs: hash routing + keys 1-4 for the pitch */
 (() => {
   const ids = ['record', 'episode', 'multiply', 'ship'];

@@ -243,7 +243,7 @@
     const ax = PX + a[0] * PW, ay = PY + a[1] * PH, bx = PX + b[0] * PW, by = PY + b[1] * PH;
     $('sh-dc1').setAttribute('cx', ax); $('sh-dc1').setAttribute('cy', ay); $('sh-dc2').setAttribute('cx', bx); $('sh-dc2').setAttribute('cy', by);
     const l = $('sh-derrl'); l.setAttribute('x1', ax); l.setAttribute('y1', ay); l.setAttribute('x2', bx); l.setAttribute('y2', by);
-    const t = $('sh-derr'); t.setAttribute('x', Math.min(bx, ax) - 12); t.setAttribute('y', Math.min(by, ay) + 4); t.setAttribute('text-anchor', 'end');
+    const t = $('sh-derr'), mx = (ax + bx) / 2, my = (ay + by) / 2; t.setAttribute('x', Math.max(PX + 40, Math.min(PX + PW - 40, mx))); t.setAttribute('y', Math.max(PY + 18, Math.min(PY + PH - 6, my - 12))); t.setAttribute('text-anchor', 'middle');
   }
   function drawDrift(tk) {
     const A = $('sh-dcam'), B = $('sh-dimu'), E = $('sh-dend'), t0 = performance.now();
@@ -287,7 +287,7 @@
     // 1. dataset stats count up
     count($('sh-er'), stats.episodes_real, 900, fmt.int, tk); count($('sh-es'), stats.episodes_sim, 1200, fmt.int, tk);
     count($('sh-fr'), stats.frames, 1400, fmt.int, tk); count($('sh-hr'), stats.hours, 1200, fmt.d1, tk); count($('sh-sz'), stats.size_mb, 1200, fmt.mb, tk);
-    document.querySelector('#scr-ship .like b').textContent = '0';
+    const lk = document.querySelector('#scr-ship .like b'); if (lk) lk.textContent = '0';
     $('sh-sizepill').textContent = stats.episodes_sim + stats.episodes_real >= 1000 ? '1K - 10K' : '100 - 1K';
     // 2. bars, 3. drift, 4. hero last
     setTimeout(() => tk === token && growBars(tk), 400);

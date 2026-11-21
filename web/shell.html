@@ -3,12 +3,13 @@
 <head>
 <meta charset="utf-8">
 <title>MIMESIS</title>
+<link rel="icon" href="data:,">
 <meta name="viewport" content="width=1920">
 <link rel="stylesheet" href="tokens.css">
 <style>
   /* Shell: top bar + tabs from Rerun viewer top bar (see LAHTEET.md), scaled for projector. */
   *{box-sizing:border-box;margin:0;padding:0}
-  html,body{width:1920px;height:1080px;overflow:hidden;background:var(--bg);color:var(--text);font-family:var(--font-ui);-webkit-font-smoothing:antialiased}
+  html{overflow:hidden;background:var(--bg)} body{width:1920px;height:1080px;overflow:hidden;background:var(--bg);color:var(--text);font-family:var(--font-ui);-webkit-font-smoothing:antialiased}
   .mono{font-family:var(--font-mono);font-variant-numeric:tabular-nums}
 
   #topbar{position:absolute;left:0;top:0;width:1920px;height:var(--topbar-h);display:flex;align-items:center;
@@ -96,6 +97,17 @@ window.M = (() => {
 </footer>
 
 <script>
+/* fit the 1920x1080 stage into any window (laptop screen, projector) */
+(() => {
+  const fit = () => {
+    const k = Math.min(innerWidth / 1920, innerHeight / 1080);
+    document.body.style.transformOrigin = '0 0';
+    document.body.style.transform = k < 0.999 || k > 1.001 ? `translate(${(innerWidth - 1920 * k) / 2}px,0) scale(${k})` : '';
+    document.documentElement.style.background = getComputedStyle(document.body).backgroundColor;
+  };
+  addEventListener('resize', fit); addEventListener('DOMContentLoaded', fit);
+})();
+
 /* tabs: hash routing + keys 1-4 for the pitch */
 (() => {
   const ids = ['record', 'episode', 'multiply', 'ship'];

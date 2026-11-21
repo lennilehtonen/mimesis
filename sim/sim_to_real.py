@@ -72,6 +72,16 @@ def window_features(df: pd.DataFrame):
     return X, starts
 
 
+def episode_norm(X: np.ndarray) -> np.ndarray:
+    """Label-free domain adaptation: robust-scale each feature within one episode (median / IQR).
+    Removes per-device and per-mount gain/offset differences between MuJoCo IMU and the real phone."""
+    if len(X) == 0:
+        return X
+    med = np.median(X, 0)
+    iqr = np.percentile(X, 75, 0) - np.percentile(X, 25, 0)
+    return (X - med) / (iqr + 1e-6)
+
+
 def window_labels(flag: np.ndarray, starts) -> np.ndarray:
     return np.array([int(flag[s:s + WIN].max() > 0) for s in starts], dtype=int)
 
@@ -102,6 +112,7 @@ def run(sim_dir, real_paths, out_json=None) -> dict:
     for p in sim_files:
         df = to_100hz(read_any(p))
         X, st = window_features(df)
+        X = episode_norm(X)
         if len(st):
             Xs.append(X)
             ys.append(window_labels(sim_sample_labels(df), st))
@@ -111,6 +122,7 @@ def run(sim_dir, real_paths, out_json=None) -> dict:
     for p in real_paths:
         df = to_100hz(read_any(p))
         X, st = window_features(df)
+        X = episode_norm(X)
         if len(st):
             Xr.append(X)
             yr.append(window_labels(real_sample_labels(df), st))
@@ -153,6 +165,7 @@ def run(sim_dir, real_paths, out_json=None) -> dict:
         "zero_shot_balanced_accuracy": bal,
         "zero_shot_f1": float(f1_score(y_te, pred, zero_division=0)),
         "zero_shot_roc_auc": auc,
+        "feature_norm": "per-episode median/IQR (no labels)",
         "model": "RandomForestClassifier(n_estimators=150, max_depth=8, class_weight=balanced_subsample)",
         "feature_importance": {n: round(float(v), 4) for n, v in zip(FEATURE_NAMES, clf.feature_importances_)},
     }

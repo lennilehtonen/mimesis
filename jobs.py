@@ -305,6 +305,7 @@ def extra_bars(reals: list[str]) -> dict:
     def windows(p, sim):
         df = s2r.to_100hz(s2r.read_any(p))
         X, st = s2r.window_features(df)
+        X = s2r.episode_norm(X)
         flag = s2r.sim_sample_labels(df) if sim else s2r.real_sample_labels(df)
         return X, s2r.window_labels(flag, st)
     real = [windows(p, False) for p in reals]

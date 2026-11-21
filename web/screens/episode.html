@@ -200,6 +200,8 @@
       d.frames = d.frames || Math.round(d.duration * d.fps); d.contacts = d.contacts || []; d.gripper = d.gripper || [];
       d.task = d.task || (EPS[n] || {}).task || 'episode';
     } else d = demoEpisode(n % 6);
+    let mx = 0, mn = 1e9; for (const v of d.imu) { if (v > mx) mx = v; if (v < mn) mn = v; }
+    d.imuLo = mn > 6 ? 4 : 0; d.imuHi = mn > 6 ? 20 : Math.max(4, Math.ceil(mx * 1.1 / 2) * 2);
     d.n = n; return d;
   }
 
@@ -208,6 +210,7 @@
   async function select(n) {
     cur = n; const d = await loadEpisode(n); if (cur !== n) return; E = d; t = 0;
     root.querySelectorAll('.ep').forEach((e, i) => e.classList.toggle('on', i === n));
+    if (!window.MIMESIS_DEMO) { $('ep-st-eps').textContent = EPS.length; $('ep-st-frames').textContent = EPS.reduce((a, e) => a + Math.round((e.dur || 0) * 30), 0).toLocaleString('en-US'); }
     $('ep-hd-n').textContent = n; $('ep-hd-task').textContent = d.task.toLowerCase();
     $('ep-m-task').textContent = d.task; $('ep-m-dur').textContent = d.duration.toFixed(1) + ' s';
     $('ep-m-sync').textContent = '+' + d.sync_offset_ms + ' ms'; $('ep-m-con').textContent = d.contacts.length;
@@ -315,8 +318,8 @@
     // vertical grid
     c.strokeStyle = line; for (let s = 0; s <= E.duration; s += 2) { const x = X(s); c.beginPath(); c.moveTo(x, 36); c.lineTo(x, TH); c.stroke(); }
     // IMU line (amber = real)
-    { const [y0, y1] = R.imu, pad = 12, lo = 4, hi = 20, Y = a => y1 - pad - (cl(a, lo, hi) - lo) / (hi - lo) * (y1 - y0 - pad * 2), n = E.imu.length, hz = E.imu_hz;
-      c.fillStyle = mut; c.font = '400 14px ' + mono; c.textAlign = 'right'; [[hi, '20'], [12, '12'], [lo, '4']].forEach(([v, s]) => c.fillText(s, LBL - 8, Y(v)));
+    { const [y0, y1] = R.imu, pad = 12, lo = E.imuLo, hi = E.imuHi, Y = a => y1 - pad - (cl(a, lo, hi) - lo) / (hi - lo) * (y1 - y0 - pad * 2), n = E.imu.length, hz = E.imu_hz;
+      c.fillStyle = mut; c.font = '400 14px ' + mono; c.textAlign = 'right'; [[hi, String(hi)], [(hi + lo) / 2, String(Math.round((hi + lo) / 2))], [lo, String(lo)]].forEach(([v, s]) => c.fillText(s, LBL - 8, Y(v)));
       c.textAlign = 'left'; c.beginPath(); const step = Math.max(1, Math.floor(n / (TW * 2)));
       for (let i = 0; i < n; i += step) { const x = X(i / hz), y = Y(E.imu[i]); i ? c.lineTo(x, y) : c.moveTo(x, y); }
       c.lineTo(X(n / hz), y1 - pad); c.lineTo(X(0), y1 - pad); c.closePath(); c.fillStyle = V('--real-soft'); c.fill();
