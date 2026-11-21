@@ -189,7 +189,13 @@ def simulate_variant(rt: pd.DataFrame, params: dict, render: bool = False, video
         if not (np.isfinite(CX[k]) and np.isfinite(CY[k])):
             return
         base_x, base_y = obj_xy[0] - float(base_xy[0]), obj_xy[1] - float(base_xy[1])  # per-variant offset
-        d.qpos[obj_jadr:obj_jadr + 3] = [CX[k] + base_x, CY[k] + base_y, obj_z0]
+        tx, ty = CX[k] + base_x, CY[k] + base_y
+        cx_, cy_ = float(d.qpos[obj_jadr]), float(d.qpos[obj_jadr + 1])
+        # a released cup stays put; it only follows the video when it really moved (> 4 cm), smoothly
+        if np.hypot(tx - cx_, ty - cy_) < 0.04 and not att.get("follow"):
+            return
+        att["follow"] = np.hypot(tx - cx_, ty - cy_) > 0.005
+        d.qpos[obj_jadr:obj_jadr + 3] = [cx_ + 0.02 * (tx - cx_), cy_ + 0.02 * (ty - cy_), obj_z0]
         d.qpos[obj_jadr + 3:obj_jadr + 7] = [1.0, 0.0, 0.0, 0.0]
         d.qvel[obj_dof:obj_dof + 6] = 0.0
 

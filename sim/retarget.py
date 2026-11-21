@@ -393,7 +393,7 @@ def retarget_exact(hands_df: pd.DataFrame, width: int, height: int, video_path=N
         else:
             i0 += 1
     u = np.where(closed, 0.0, np.maximum((u - 0.5) * 2.0, 0.3))
-    u = pd.Series(u).rolling(15, center=True, min_periods=1).mean().to_numpy()
+    u = pd.Series(u).rolling(5, center=True, min_periods=1).mean().to_numpy()  # open/close without lag
     grip = GRIP_CLOSED - u * (GRIP_CLOSED - GRIP_OPEN)
 
     # place the cup under the hand at the first closure; shift z so the wrist sits at grasp height there
