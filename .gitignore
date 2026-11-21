@@ -6,3 +6,4 @@ data/
 !data/.gitkeep
 models/
 *.task
+!web/vendor/mediapipe/hand_landmarker.task
