@@ -6,7 +6,7 @@
         <span class="rc-title">Chest cam · first person</span><span class="rc-tag real">REAL</span><span class="rc-sp"></span><span class="rc-meta mono" id="rc-fps">30 fps · 1080p</span><span class="rc-icons"><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.2" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M6.2 6.3a1.9 1.9 0 1 1 2.6 1.7c-.6.3-.8.6-.8 1.2M8 11.4v.2" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg><svg viewBox="0 0 16 16"><path d="M1.5 8S4 3.5 8 3.5 14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8Z" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="8" cy="8" r="2" fill="currentColor"/></svg><svg viewBox="0 0 16 16"><path d="M9.5 2h4.5v4.5M6.5 14H2V9.5M14 2 9 7M2 14l5-5" fill="none" stroke="currentColor" stroke-width="1.3"/></svg></span></div>
       <div class="rc-body">
         <!-- WIRE: replace canvas with <video> src = camera MJPEG/MP4 (GET /files/episode_overlay.mp4) or getUserMedia -->
-        <video id="rc-video" muted playsinline hidden></video>
+        <video id="rc-video" muted playsinline autoplay style="position:absolute;left:0;top:0;width:2px;height:2px;opacity:0;pointer-events:none"></video>
         <canvas id="rc-cam" width="1152" height="740"></canvas>
         <div class="rc-live"><i></i><span id="rc-livetxt">LIVE</span></div>
       </div>
@@ -196,10 +196,12 @@
     if (video.readyState >= 2 && video.videoWidth) {
       const vw = video.videoWidth, vh = video.videoHeight, sc = Math.max(W / vw, H / vh), dw = vw * sc, dh = vh * sc, ox = (W - dw) / 2, oy = (H - dh) / 2;
       cx.drawImage(video, ox, oy, dw, dh);
-      if (landmarker && ts - lastDet > 30) {
+      if (landmarker && ts - lastDet > detGap) {
         lastDet = ts;
         try {
+          const d0 = performance.now();
           const r = landmarker.detectForVideo(video, ts);
+          const dt = performance.now() - d0; detGap = Math.min(250, Math.max(33, dt * 3));  // adapt: never eat more than ~1/3 of the frame budget
           hands2 = (r.landmarks || []).map(h => h.map(p => [(ox + p.x * dw) / W, (oy + p.y * dh) / H]));
         } catch (e) { console.warn('mediapipe', e); landmarker = null; }
       }
@@ -233,8 +235,9 @@
     try { const r = await fetch((M.api || '') + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) }); return await r.json(); } catch (e) { return null; /* offline demo */ }
   }
   /* ---- live camera (Continuity Camera via getUserMedia) + MediaPipe Tasks JS + MediaRecorder ---- */
-  const video = $('rc-video'); let landmarker = null, lastDet = 0, stream = null, recorder = null, chunks = [], curEp = null;
-  async function startCam() {
+  const video = $('rc-video'); let detGap = 33, camRetry = null; let landmarker = null, lastDet = 0, stream = null, recorder = null, chunks = [], curEp = null;
+  async function startCam() { await openCam(); loadHands(); }
+  async function openCam() {
     try {
       stream = await navigator.mediaDevices.getUserMedia({ video: { width: 1920, height: 1080 }, audio: true });
       const devs = await navigator.mediaDevices.enumerateDevices();
@@ -245,8 +248,20 @@
         stream = await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: iph.deviceId }, width: 1920, height: 1080 }, audio: true });
       }
       video.srcObject = stream; await video.play(); M.camera = true;
-      const st = stream.getVideoTracks()[0].getSettings(); $('rc-fps').textContent = Math.round(st.frameRate || 30) + ' fps · ' + st.height + 'p';
-    } catch (e) { console.warn('camera', e); M.camera = false; $('rc-fps').textContent = 'no camera'; }
+      const tr = stream.getVideoTracks()[0], st = tr.getSettings(); $('rc-fps').textContent = Math.round(st.frameRate || 30) + ' fps · ' + st.height + 'p';
+      tr.onended = () => { console.warn('camera track ended, reconnecting'); M.camera = false; retryCam(); };
+      tr.onmute = () => { M.camera = false; }; tr.onunmute = () => { M.camera = true; };
+    } catch (e) { console.warn('camera', e); M.camera = false; $('rc-fps').textContent = 'no camera · retrying'; retryCam(); }
+  }
+  function retryCam() { if (camRetry) return; camRetry = setTimeout(() => { camRetry = null; if (stream) stream.getTracks().forEach(t => t.stop()); stream = null; openCam(); }, 2000); }
+  // watchdog: a frozen stream (Continuity Camera dropped, phone locked) -> reopen
+  let lastVT = -1, frozenFor = 0;
+  setInterval(() => {
+    if (window.MIMESIS_DEMO || !stream || recorder) return;
+    if (video.currentTime === lastVT) { if (++frozenFor >= 3) { frozenFor = 0; console.warn('camera frozen, reopening'); M.camera = false; retryCam(); } } else frozenFor = 0;
+    lastVT = video.currentTime;
+  }, 1000);
+  async function loadHands() {
     try {
       const { FilesetResolver, HandLandmarker } = await import('/vendor/mediapipe/vision_bundle.mjs');
       const fs = await FilesetResolver.forVisionTasks('/vendor/mediapipe/wasm');

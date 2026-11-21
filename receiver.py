@@ -132,11 +132,8 @@ def ingest(msg: dict) -> tuple[str, int]:
                 LIVE.append(dict(LATEST_STATE, time_ns=tns))
                 LIVE_SEQ += 1
         LAST_PUSH_WALL = time.time()
-    if s["messages"] % 5 == 0 and ACTIVE_EPISODE is not None:
-        try:
-            flush_session(sid)
-        except Exception as e:  # never break ingest on a flush error
-            print("flush error:", e)
+    if s["messages"] % 10 == 0 and ACTIVE_EPISODE is not None and not FLUSHING.locked():
+        threading.Thread(target=_bg_flush, args=(sid,), daemon=True).start()
     return sid, n
 
 
@@ -183,11 +180,13 @@ def align_session_streams(streams: dict) -> pd.DataFrame:
     return out
 
 
-def write_episode(df: pd.DataFrame, episode_id: str, task: str, extra: dict | None = None) -> dict:
+def write_episode(df: pd.DataFrame, episode_id: str, task: str, extra: dict | None = None, csv: bool = True) -> dict:
     pq = OUT_DIR / f"{episode_id}.parquet"
-    csv = OUT_DIR / f"{episode_id}.csv"
+    csv_p = OUT_DIR / f"{episode_id}.csv"
     df.to_parquet(pq, index=False)
-    df.to_csv(csv, index=False)
+    if csv:
+        df.to_csv(csv_p, index=False)
+    csv = csv_p
     dur = float(df["t_rel_s"].iloc[-1]) if len(df) else 0.0
     meta = {"episode_id": episode_id, "task": task, "num_samples": int(len(df)), "duration_s": dur,
             "effective_hz": (len(df) - 1) / dur if dur > 0 else 0.0,
@@ -197,7 +196,22 @@ def write_episode(df: pd.DataFrame, episode_id: str, task: str, extra: dict | No
     return meta
 
 
-def flush_session(sid: str) -> dict | None:
+FLUSHING = threading.Lock()
+
+
+def _bg_flush(sid: str) -> None:
+    """Periodic safety flush off the request thread, parquet only (CSV is written on stop)."""
+    if not FLUSHING.acquire(blocking=False):
+        return
+    try:
+        flush_session(sid, csv=False)
+    except Exception as e:  # never break ingest on a flush error
+        print("flush error:", e)
+    finally:
+        FLUSHING.release()
+
+
+def flush_session(sid: str, csv: bool = True) -> dict | None:
     with LOCK:
         s = SESSIONS.get(sid)
         if not s:
@@ -206,7 +220,7 @@ def flush_session(sid: str) -> dict | None:
     df = align_session_streams(streams)
     if df.empty:
         return None
-    return write_episode(df, s["episode_id"], s["task"], {
+    return write_episode(df, s["episode_id"], s["task"], csv=csv, extra={
         "session_id": sid, "device_id": s["device_id"], "message_count": s["messages"],
         "sensor_counts": {k: len(v) for k, v in streams.items()}})
 
@@ -225,7 +239,7 @@ def import_csv_dir(folder: str, episode_id: str, task: str) -> dict:
                 streams[key] = [(int(r[tcol]), {k: r[k] for k in df.columns if k != tcol}) for _, r in df.iterrows()]
     if not streams:
         raise SystemExit(f"no Sensor Logger CSVs in {p}")
-    meta = write_episode(align_session_streams(streams), episode_id, task, {"source": str(p)})
+    meta = write_episode(align_session_streams(streams), episode_id, task, extra={"source": str(p)})
     print(json.dumps(meta, indent=2))
     return meta
 
@@ -404,7 +418,7 @@ async def episode_stop(request: Request):
     ACTIVE_EPISODE = None
     if not sid or sid not in SESSIONS:
         return {"status": "no_active_session", "episode": ep}
-    meta = flush_session(sid)
+    meta = await asyncio.to_thread(flush_session, sid)
     with LOCK:  # detach so the next recording on the same sessionId starts clean
         SESSIONS.pop(sid, None)
     return {"status": "flushed", "meta": meta}
