@@ -497,8 +497,9 @@ def multiply(episode: str, n: int = 100, render: int = 9):
 
 @app.post("/multiply")
 def multiply_latest(n: int = 100, render: int = 9):
-    eps = [e for e in list_episodes() if e["aligned"]] or list_episodes()
-    ep = eps[-1]["episode_id"] if eps else "latest"
+    # newest processed take (video-only takes included)
+    pubs = sorted(PUB_DIR.glob("ep_*.json"), key=lambda p: p.stat().st_mtime)
+    ep = pubs[-1].stem[3:] if pubs else "latest"
     return multiply(ep, n, render)
 
 
