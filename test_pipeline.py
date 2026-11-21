@@ -55,7 +55,7 @@ def main():
         return json.loads(urllib.request.urlopen(req, timeout=10).read())
 
     try:
-        for _ in range(50):
+        for _ in range(300):
             try:
                 urllib.request.urlopen(base + "/status", timeout=1)
                 break
