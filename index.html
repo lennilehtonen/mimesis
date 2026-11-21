@@ -1,0 +1,1633 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>MIMESIS</title>
+<link rel="icon" href="data:,">
+<meta name="viewport" content="width=1920">
+<link rel="stylesheet" href="tokens.css">
+<style>
+  /* Shell: top bar + tabs from Rerun viewer top bar (see LAHTEET.md), scaled for projector. */
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{overflow:hidden;background:var(--bg)} body{width:1920px;height:1080px;overflow:hidden;background:var(--bg);color:var(--text);font-family:var(--font-ui);-webkit-font-smoothing:antialiased}
+  .mono{font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+
+  #topbar{position:absolute;left:0;top:0;width:1920px;height:var(--topbar-h);display:flex;align-items:center;
+    padding:0 28px;background:var(--bg);border-bottom:1px solid var(--line)}
+  #wordmark{display:flex;align-items:center;gap:14px;font-weight:600;font-size:22px;letter-spacing:var(--tracking-wordmark)}
+  #wordmark svg{width:19px;height:38px}
+  #tabs{position:absolute;left:50%;transform:translateX(-50%);display:flex;gap:6px;height:44px}
+  #tabs a{display:flex;align-items:center;gap:10px;padding:0 20px;border-radius:var(--r-md);color:var(--text-muted);
+    text-decoration:none;font-size:var(--fs-md);font-weight:500;border:1px solid transparent;transition:background var(--t-fast),color var(--t-fast)}
+  #tabs a .n{font-family:var(--font-mono);font-size:var(--fs-sm);width:26px;height:26px;border-radius:50%;display:grid;place-items:center;border:1px solid var(--line-strong)}
+  #tabs a.on{color:var(--text);background:var(--surface-2);border-color:var(--line)}
+  #tabs a.on .n{background:var(--text);color:var(--bg);border-color:var(--text)}
+  #tabs a.done .n{border-color:var(--ok);color:var(--ok)}
+  #tabs .sep{align-self:center;width:18px;height:1px;background:var(--line-strong)}
+  #status{margin-left:auto;display:flex;gap:10px}
+  .pill{display:inline-flex;align-items:center;gap:8px;height:34px;padding:0 14px;border-radius:999px;border:1px solid var(--line);
+    background:var(--surface);font-size:var(--fs-sm);color:var(--text-muted)}
+  .pill b{color:var(--text);font-weight:500}
+  .pill .dot{width:9px;height:9px;border-radius:50%;background:var(--text-dim)}
+  .pill.live .dot{background:var(--ok);box-shadow:0 0 0 4px var(--ok-soft)}
+  .pill.rec{border-color:var(--slip);color:var(--slip)} .pill.rec .dot{background:var(--slip);animation:pulse 1s infinite}
+  .pill.off .dot{background:var(--text-dim)}
+  @keyframes pulse{50%{opacity:.25}}
+
+  main{position:absolute;left:0;top:var(--topbar-h);width:1920px;height:var(--main-h)}
+  .screen{position:absolute;inset:0;display:none}
+  .screen.on{display:block}
+
+  #ticker{position:absolute;left:0;bottom:0;width:1920px;height:var(--ticker-h);display:flex;align-items:center;gap:36px;
+    padding:0 28px;border-top:1px solid var(--line);background:var(--bg);font-size:var(--fs-sm);color:var(--text-muted)}
+  #ticker b{font-family:var(--font-mono);font-weight:500;color:var(--text);margin-left:8px}
+  #ticker .r b{color:var(--real)} #ticker .s b{color:var(--sim)}
+  #ticker .right{margin-left:auto;color:var(--text-muted)}
+</style>
+<script>
+/* ---------- M: tiny event bus. Screens subscribe; the data source emits. ----------
+   Frontend dev: replace the DEMO block with the WebSocket / polling source, keep the event names.
+   Events:
+     'status'  {wrist:bool, hz:number, camera:bool, episodes:number}
+     'imu'     {t:sec, ax,ay,az, gx,gy,gz, a:|a| m/s2, g:|gyro| rad/s, q:[w,x,y,z]}   (100 Hz)
+     'contact' {t:sec, kind:'GRAB'|'TAP'|'SLIP'|'SET-DOWN'}
+     'hand'    {joints:[[x,y],...21] normalized 0..1}
+     'rec'     {on:bool, t0:sec}
+*/
+window.M = (() => {
+  const h = {};
+  return {
+    on(e, f) { (h[e] = h[e] || []).push(f); },
+    emit(e, d) { (h[e] || []).forEach(f => f(d)); },
+    api: '' /* e.g. 'http://localhost:8000' */
+  };
+})();
+
+</script>
+</head>
+<body>
+<header id="topbar">
+  <div id="wordmark">
+    <!-- mark: amber ring (real) over cyan ring (sim), same as deck -->
+    <svg viewBox="0 0 24 49" aria-hidden="true" fill="none" stroke-width="4"><circle cx="12" cy="12" r="9.5" stroke="#FFB547"/><circle cx="12" cy="37" r="9.5" stroke="#3EE6FF"/></svg>
+    MIMESIS
+  </div>
+  <nav id="tabs">
+    <a href="#record" data-s="record"><span class="n">1</span>Record</a><span class="sep"></span>
+    <a href="#episode" data-s="episode"><span class="n">2</span>Episode</a><span class="sep"></span>
+    <a href="#multiply" data-s="multiply"><span class="n">3</span>Multiply</a><span class="sep"></span>
+    <a href="#ship" data-s="ship"><span class="n">4</span>Ship</a>
+  </nav>
+  <div id="status">
+    <span class="pill off" id="st-wrist"><span class="dot"></span>Wrist <b class="mono" id="st-hz">— Hz</b></span>
+    <span class="pill off" id="st-cam"><span class="dot"></span>Camera</span>
+    <span class="pill"><span class="mono" id="st-eps">0</span>&nbsp;episodes</span>
+  </div>
+</header>
+
+<main>
+<section id="scr-record" class="screen">
+  <div class="rc-grid">
+    <!-- LEFT: camera panel -->
+    <div class="rc-panel rc-cam real">
+      <div class="rc-head"><svg viewBox="0 0 16 16"><rect x="1.5" y="4" width="13" height="9" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="8" cy="8.5" r="2.4" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>
+        <span class="rc-title">Chest cam · first person</span><span class="rc-tag real">REAL</span><span class="rc-sp"></span><span class="rc-meta mono" id="rc-fps">30 fps · 1080p</span><span class="rc-icons"><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.2" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M6.2 6.3a1.9 1.9 0 1 1 2.6 1.7c-.6.3-.8.6-.8 1.2M8 11.4v.2" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg><svg viewBox="0 0 16 16"><path d="M1.5 8S4 3.5 8 3.5 14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8Z" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="8" cy="8" r="2" fill="currentColor"/></svg><svg viewBox="0 0 16 16"><path d="M9.5 2h4.5v4.5M6.5 14H2V9.5M14 2 9 7M2 14l5-5" fill="none" stroke="currentColor" stroke-width="1.3"/></svg></span></div>
+      <div class="rc-body">
+        <!-- WIRE: replace canvas with <video> src = camera MJPEG/MP4 (GET /files/episode_overlay.mp4) or getUserMedia -->
+        <video id="rc-video" muted playsinline autoplay style="position:absolute;left:0;top:0;width:2px;height:2px;opacity:0;pointer-events:none"></video>
+        <canvas id="rc-cam" width="1152" height="740"></canvas>
+        <div class="rc-live"><i></i><span id="rc-livetxt">LIVE</span></div>
+      </div>
+    </div>
+    <!-- RIGHT -->
+    <div class="rc-right">
+      <div class="rc-panel rc-imu">
+        <div class="rc-head"><svg viewBox="0 0 16 16"><path d="M1.5 9.5 4 9.5 5.5 4 8 13 10 7 11.5 9.5 14.5 9.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>
+          <span class="rc-title">Wrist IMU · |a|</span><span class="rc-tag real">REAL</span><span class="rc-sp"></span><span class="rc-meta mono">5 s window</span><span class="rc-icons"><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.2" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M6.2 6.3a1.9 1.9 0 1 1 2.6 1.7c-.6.3-.8.6-.8 1.2M8 11.4v.2" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg><svg viewBox="0 0 16 16"><path d="M1.5 8S4 3.5 8 3.5 14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8Z" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="8" cy="8" r="2" fill="currentColor"/></svg><svg viewBox="0 0 16 16"><path d="M9.5 2h4.5v4.5M6.5 14H2V9.5M14 2 9 7M2 14l5-5" fill="none" stroke="currentColor" stroke-width="1.3"/></svg></span></div>
+        <div class="rc-body"><canvas id="rc-plot" width="766" height="408"></canvas><div class="rc-legend"><span><i style="background:var(--real)"></i>|a|</span><span><i style="background:var(--ev-grab)"></i>GRAB</span><span><i style="background:var(--ev-tap)"></i>TAP</span><span><i style="background:var(--ev-slip)"></i>SLIP</span><span><i style="background:var(--ev-setdown)"></i>SET-DOWN</span></div></div>
+      </div>
+      <div class="rc-panel rc-sel">
+        <div class="rc-head"><span class="rc-title caps">Selection</span><span class="rc-sp"></span><span class="rc-meta">wrist iPhone</span></div>
+        <div class="rc-selbody">
+          <div class="rc-orient"><div class="rc-scene"><div class="rc-phone" id="rc-phone"><i></i></div></div><div class="rc-axis mono">q = <span id="rc-q">1 0 0 0</span></div></div>
+          <div class="rc-kv">
+            <div class="rc-row"><span class="k">|a|</span><span class="v mono"><b id="rc-a">9.81</b><u>m/s²</u></span></div>
+            <div class="rc-row"><span class="k">gyro</span><span class="v mono"><b id="rc-g">0.00</b><u>rad/s</u></span></div>
+            <div class="rc-row"><span class="k">rate</span><span class="v mono"><b id="rc-hz">100</b><u>Hz</u></span></div>
+            <div class="rc-row small"><span class="k">last contact</span><span class="v mono" id="rc-last">none yet</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- BOTTOM: controls -->
+    <div class="rc-ctrl">
+      <label class="rc-task"><span class="caps">Task</span>
+        <select id="rc-task"><option>Pick up cup</option><option>Pour</option><option>Open drawer</option></select></label>
+      <button id="rc-rec" type="button"><i class="rc-dot"></i><span id="rc-rectxt">RECORD</span></button>
+      <div class="rc-hint"><span class="mono clap"><svg viewBox="0 0 24 24"><path d="M7 11 4.5 8.5M10 8 8.5 5M14 8l1.5-3M17 11l2.5-2.5M6 14c0 4 3 7 6.5 7s6-3 6-7l-2-4-2.5 3-3-6-3 6-2-1.5z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/></svg>×3</span><span>Clap 3× to sync</span></div>
+      <span class="rc-sp"></span>
+      <div class="rc-clock mono"><span>timestamp</span><b id="rc-clock">00:00:00</b><span>1.00x</span></div>
+      <div class="rc-counts mono"><span>events <b id="rc-nev">0</b></span><span>episodes <b id="rc-neps">0</b></span></div>
+    </div>
+    <!-- disconnected overlay (wrist) -->
+    <div class="rc-off" id="rc-off"><div><div class="rc-offt">Wrist phone disconnected</div>
+      <div class="rc-offh">Reconnect: open <b>Sensor Logger</b>, push to <span class="mono" id="rc-ip">&lt;mac-ip&gt;:8000</span></div></div></div>
+  </div>
+</section>
+<style>
+#scr-record{--rc-h:36px}
+#scr-record *{box-sizing:border-box}
+#scr-record .rc-grid{position:absolute;inset:0;padding:12px;background:var(--bg)}
+#scr-record .rc-grid::after{content:"";position:absolute;inset:0;border:2px solid transparent;pointer-events:none;border-radius:2px;transition:border-color var(--t-med)}
+#scr-record.recording .rc-grid::after{border-color:var(--slip);animation:rcb 1.2s ease-in-out infinite}
+@keyframes rcb{50%{border-color:rgba(255,77,94,.25)}}
+#scr-record .rc-panel{position:absolute;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden}
+#scr-record .rc-cam{left:12px;top:12px;width:1152px;height:784px;border-color:var(--real)}
+#scr-record .rc-right{position:absolute;left:1176px;top:12px;width:732px}
+#scr-record .rc-imu{left:0;top:0;width:732px;height:452px}
+#scr-record .rc-sel{left:0;top:464px;width:732px;height:320px}
+#scr-record .rc-head{height:44px;display:flex;align-items:center;gap:10px;padding:0 14px;background:var(--surface-2);border-bottom:1px solid var(--line);font-size:var(--fs-md);color:var(--text)}
+#scr-record .rc-head svg{width:20px;height:20px;color:var(--text-muted)}
+#scr-record .rc-sp{flex:1}
+#scr-record .rc-meta{font-size:var(--fs-sm);color:var(--text-muted)}
+#scr-record .caps{text-transform:uppercase;letter-spacing:var(--tracking-caps);font-size:var(--fs-sm);font-weight:600;color:var(--text-muted)}
+#scr-record .rc-tag{font-size:var(--fs-xs);font-weight:700;letter-spacing:var(--tracking-caps);padding:2px 8px;border-radius:var(--r-sm)}
+#scr-record .rc-tag.real{background:var(--real-soft);color:var(--real)}
+#scr-record .rc-body{position:relative;height:calc(100% - 44px)}
+#scr-record canvas{display:block;width:100%;height:100%}
+#scr-record .rc-live{position:absolute;left:16px;top:16px;display:flex;align-items:center;gap:8px;padding:6px 12px;border-radius:var(--r-sm);background:rgba(11,13,16,.7);font-family:var(--font-mono);font-size:var(--fs-sm);color:var(--text)}
+#scr-record .rc-live i{width:10px;height:10px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 4px var(--ok-soft)}
+#scr-record.recording .rc-live i{background:var(--slip);box-shadow:0 0 0 4px var(--slip-soft);animation:rcp 1s infinite}
+@keyframes rcp{50%{opacity:.3}}
+#scr-record .rc-selbody{display:flex;height:calc(100% - 44px)}
+#scr-record .rc-orient{width:250px;border-right:1px solid var(--line);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px}
+#scr-record .rc-scene{width:150px;height:190px;perspective:600px;display:grid;place-items:center}
+#scr-record .rc-phone{width:76px;height:150px;border:3px solid var(--real);border-radius:14px;background:var(--real-soft);transform-style:preserve-3d;position:relative;transition:transform 60ms linear}
+#scr-record .rc-phone i{position:absolute;left:50%;top:8px;width:22px;height:5px;margin-left:-11px;border-radius:3px;background:var(--real)}
+#scr-record .rc-axis{font-size:var(--fs-xs);color:var(--text-muted)}
+#scr-record .rc-kv{flex:1;padding:6px 20px;display:flex;flex-direction:column;justify-content:center}
+#scr-record .rc-row{display:flex;align-items:baseline;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--line)}
+#scr-record .rc-row:last-child{border:0}
+#scr-record .k{font-size:var(--fs-md);color:var(--text-muted)}
+#scr-record .v b{font-size:var(--fs-xl);font-weight:500;color:var(--real);letter-spacing:-.02em}
+#scr-record .v u{text-decoration:none;font-size:var(--fs-sm);color:var(--text-muted);margin-left:8px}
+#scr-record .row.small .v,#scr-record .rc-row.small .v{font-size:var(--fs-md);color:var(--text)}
+#scr-record .rc-ctrl{position:absolute;left:12px;right:12px;top:808px;height:144px;display:flex;align-items:center;gap:32px;padding:0 28px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-md)}
+#scr-record .rc-task{display:flex;flex-direction:column;gap:8px}
+#scr-record select{height:56px;min-width:300px;padding:0 16px;background:var(--surface-2);color:var(--text);border:1px solid var(--line-strong);border-radius:var(--r-md);font:500 var(--fs-lg) var(--font-ui)}
+#scr-record #rc-rec{display:flex;align-items:center;gap:20px;height:96px;min-width:380px;padding:0 40px;border-radius:var(--r-lg);border:2px solid var(--slip);background:var(--slip-soft);color:var(--text);font:600 40px var(--font-ui);letter-spacing:.06em;cursor:pointer;justify-content:center;transition:background var(--t-fast)}
+#scr-record #rc-rec:hover{background:rgba(255,77,94,.28)}
+#scr-record .rc-dot{width:36px;height:36px;border-radius:50%;background:var(--slip)}
+#scr-record.recording #rc-rec{background:var(--slip);color:var(--on-accent);font-family:var(--font-mono);font-size:56px;letter-spacing:0}
+#scr-record.recording .rc-dot{width:28px;height:28px;background:var(--on-accent);border-radius:4px}
+#scr-record .rc-hint{display:flex;align-items:center;gap:16px;font-size:var(--fs-lg);color:var(--text-muted)}
+#scr-record .rc-hint .clap{font-size:var(--fs-lg);padding:6px 14px;border:1px solid var(--line-strong);border-radius:var(--r-md);color:var(--real)}
+#scr-record .rc-counts{display:flex;gap:32px;font-size:var(--fs-md);color:var(--text-muted)}
+#scr-record .rc-counts b{color:var(--text);font-weight:500;font-size:var(--fs-lg);margin-left:6px}
+#scr-record .rc-off{position:absolute;left:12px;top:12px;width:1896px;height:784px;display:none;place-items:center;text-align:center;background:rgba(20,24,29,.93);border-radius:var(--r-md);z-index:5}
+#scr-record.disc .rc-off{display:grid}
+#scr-record .rc-offt{font-size:var(--fs-hero);font-size:64px;font-weight:600;color:var(--text-muted);margin-bottom:24px}
+#scr-record .rc-offh{font-size:var(--fs-lg);color:var(--text-muted)}
+#scr-record .rc-offh b{color:var(--text)} #scr-record .rc-offh .mono{color:var(--real)}
+#scr-record .rc-icons{display:flex;gap:16px;margin-left:16px;color:var(--text-muted)}
+#scr-record .rc-icons svg{width:20px;height:20px}
+#scr-record .rc-legend{position:absolute;left:68px;bottom:44px;padding:8px 14px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-md);display:flex;flex-direction:column;gap:2px;font-size:var(--fs-sm);color:var(--text)}
+#scr-record .rc-legend span{display:flex;align-items:center;gap:10px}
+#scr-record .rc-legend i{width:10px;height:10px;border-radius:50%}
+#scr-record .rc-clock{display:flex;align-items:center;gap:16px;font-size:var(--fs-md);color:var(--text-muted)}
+#scr-record .rc-clock b{font-weight:500;color:var(--text);padding:8px 16px;border:1px solid var(--line-strong);border-radius:var(--r-sm);font-size:var(--fs-lg)}
+#scr-record .rc-ctrl{border-top:2px solid var(--line-strong)}
+#scr-record .rc-hint .clap svg{width:30px;height:30px;vertical-align:middle;margin-right:6px}
+</style>
+<script>
+(() => { const init = () => {
+  const root = document.getElementById('scr-record');
+  const $ = id => document.getElementById(id);
+  const css = getComputedStyle(document.documentElement);
+  const V = n => css.getPropertyValue(n).trim();
+  const C = { real: V('--real'), text: V('--text'), muted: V('--text-muted'), line: V('--line'), line2: V('--line-strong'), bg: V('--surface'), dim: V('--text-dim'),
+    ev: { GRAB: V('--ev-grab'), TAP: V('--ev-tap'), SLIP: V('--ev-slip'), 'SET-DOWN': V('--ev-setdown') }, mono: V('--font-mono') };
+  const font = (px, w) => (w || 400) + ' ' + px + 'px ' + C.mono;
+
+  /* ---- state ---- */
+  const buf = [];           // {t,a}
+  const evs = [];           // {t,kind,wall}
+  let lastT = 0, lastWall = performance.now(), hand = null, nev = 0, ymax = 20, connected = true;
+  M.on('imu', d => {
+    buf.push({ t: d.t, a: d.a }); if (buf.length > 900) buf.shift();
+    lastT = d.t; lastWall = performance.now();
+    $('rc-a').textContent = d.a.toFixed(2); $('rc-g').textContent = d.g.toFixed(2);
+    if (d.q) {
+      $('rc-q').textContent = d.q.map(x => x.toFixed(2)).join(' ');
+      const [w, x, y, z] = d.q, n = Math.hypot(w, x, y, z) || 1, a = w / n, b = x / n, c = y / n, e = z / n;
+      const r = [[1-2*(c*c+e*e), 2*(b*c-a*e), 2*(b*e+a*c)], [2*(b*c+a*e), 1-2*(b*b+e*e), 2*(c*e-a*b)], [2*(b*e-a*c), 2*(c*e+a*b), 1-2*(b*b+c*c)]];
+      const s = [1, -1, -1], m = (i, j) => (r[i][j] * s[i] * s[j]).toFixed(4);   // flip to CSS y-down
+      $('rc-phone').style.transform = `rotateX(-18deg) rotateY(24deg) matrix3d(${m(0,0)},${m(1,0)},${m(2,0)},0,${m(0,1)},${m(1,1)},${m(2,1)},0,${m(0,2)},${m(1,2)},${m(2,2)},0,0,0,0,1)`;
+    }
+  });
+  M.on('contact', d => { evs.push({ t: d.t, kind: d.kind, wall: performance.now() }); if (evs.length > 40) evs.shift(); nev++; $('rc-nev').textContent = nev;
+    const l = $('rc-last'); l.textContent = d.kind; l.style.color = C.ev[d.kind] || C.text; });
+  M.on('hand', d => { hand = d.joints; hands2 = null; });
+  let hands2 = null;   // live MediaPipe result: array of 21-joint hands in canvas-normalized coords
+  M.on('status', s => {
+    connected = !!s.wrist; root.classList.remove('disc');  // video-only product: no wrist overlay
+    $('rc-hz').textContent = s.wrist ? Math.round(s.hz) : '—'; $('rc-neps').textContent = s.episodes;
+    $('rc-livetxt').textContent = s.camera ? (recOn ? 'REC' : 'LIVE') : 'NO CAMERA';
+  });
+  $('rc-ip').textContent = (location.hostname || '<mac-ip>') + ':8000';
+  if (!window.MIMESIS_DEMO) fetch('/config').then(r => r.json()).then(c => { $('rc-ip').textContent = c.sensor_logger_url; }).catch(() => {});
+
+  /* ---- plot (Rerun style: grid, ticks, cursor) ---- */
+  const pc = $('rc-plot'), px = pc.getContext('2d');
+  function drawPlot() {
+    const W = pc.width, H = pc.height, L = 56, R = 14, T = 14, B = 34, pw = W - L - R, ph = H - T - B;
+    px.clearRect(0, 0, W, H);
+    const now = lastT + Math.min((performance.now() - lastWall) / 1000, .2), t0 = now - 5;
+    let pk = 0; for (const s of buf) if (s.t >= t0 && s.a > pk) pk = s.a;
+    const target = Math.max(20, Math.ceil(pk * 1.15 / 5) * 5); ymax += (target - ymax) * .08;
+    const X = t => L + (t - t0) / 5 * pw, Y = a => T + ph - a / ymax * ph;
+    px.lineWidth = 1; px.font = font(14); px.textBaseline = 'middle'; px.textAlign = 'right';
+    const step = ymax > 30 ? 10 : 5;
+    for (let a = 0; a <= ymax; a += step) { const y = Math.round(Y(a)) + .5; px.strokeStyle = C.line; px.beginPath(); px.moveTo(L, y); px.lineTo(L + pw, y); px.stroke(); px.fillStyle = C.muted; px.fillText(a, L - 8, y); }
+    px.textAlign = 'center'; px.textBaseline = 'top';
+    for (let s = Math.ceil(t0); s <= now; s++) { const x = Math.round(X(s)) + .5; px.strokeStyle = C.line; px.beginPath(); px.moveTo(x, T); px.lineTo(x, T + ph); px.stroke(); px.fillStyle = C.muted; px.fillText((s - now).toFixed(0) + ' s', x, T + ph + 8); }
+    px.strokeStyle = C.line2; px.strokeRect(L + .5, T + .5, pw, ph);
+    // events
+    px.save(); px.beginPath(); px.rect(L, T, pw, ph); px.clip();
+    const tnow = performance.now(); let row = 0;
+    for (const e of evs) {
+      if (e.t < t0) continue; const x = Math.round(X(e.t)) + .5, col = C.ev[e.kind] || C.text, age = tnow - e.wall;
+      if (age < 400) { px.globalAlpha = (1 - age / 400) * .35; px.fillStyle = col; px.fillRect(x - 14, T, 28, ph); }
+      px.globalAlpha = 1; px.strokeStyle = col; px.lineWidth = 2; px.beginPath(); px.moveTo(x, T); px.lineTo(x, T + ph); px.stroke();
+    }
+    // line
+    px.strokeStyle = C.real; px.lineWidth = 2.5; px.lineJoin = 'round'; px.beginPath(); let st = false;
+    for (const s of buf) { if (s.t < t0 - .1) continue; const x = X(s.t), y = Y(Math.min(s.a, ymax)); st ? px.lineTo(x, y) : px.moveTo(x, y); st = true; }
+    px.stroke(); px.restore();
+    // chips
+    px.font = font(16, 600); px.textAlign = 'left'; px.textBaseline = 'middle'; row = 0;
+    for (const e of evs) {
+      if (e.t < t0) continue; const x = X(e.t), col = C.ev[e.kind] || C.text, w = px.measureText(e.kind).width + 16, cx = Math.min(x + 4, L + pw - w);
+      const cy = T + 6 + (row++ % 2) * 28; px.fillStyle = col; px.beginPath(); px.roundRect(cx, cy, w, 24, 4); px.fill();
+      px.fillStyle = V('--on-accent'); px.fillText(e.kind, cx + 8, cy + 13);
+    }
+    // cursor (Rerun time cursor at "now")
+    px.strokeStyle = C.text; px.lineWidth = 1.5; const cxp = L + pw - .5; px.beginPath(); px.moveTo(cxp, T); px.lineTo(cxp, T + ph); px.stroke();
+    px.fillStyle = C.text; px.beginPath(); px.moveTo(cxp - 7, T - 1); px.lineTo(cxp + 7, T - 1); px.lineTo(cxp, T + 9); px.fill();
+    px.fillStyle = C.muted; px.font = font(14); px.save(); px.translate(14, T + ph / 2); px.rotate(-Math.PI / 2); px.textAlign = 'center'; px.fillText('m/s²', 0, 0); px.restore();
+  }
+
+  /* ---- camera + skeleton ---- */
+  const cc = $('rc-cam'), cx = cc.getContext('2d'), CH = [1, 5, 9, 13, 17];
+  function drawCam(ts) {
+    const W = cc.width, H = cc.height, t = ts / 1000;
+    if (video.readyState >= 2 && video.videoWidth) {
+      const vw = video.videoWidth, vh = video.videoHeight, sc = Math.max(W / vw, H / vh), dw = vw * sc, dh = vh * sc, ox = (W - dw) / 2, oy = (H - dh) / 2;
+      cx.drawImage(video, ox, oy, dw, dh);
+      if (landmarker && ts - lastDet > detGap) {
+        lastDet = ts;
+        try {
+          const d0 = performance.now();
+          const r = landmarker.detectForVideo(video, ts);
+          const dt = performance.now() - d0; detGap = Math.min(250, Math.max(33, dt * 3));  // adapt: never eat more than ~1/3 of the frame budget
+          hands2 = (r.landmarks || []).map(h => h.map(p => [(ox + p.x * dw) / W, (oy + p.y * dh) / H]));
+        } catch (e) { console.warn('mediapipe', e); landmarker = null; }
+      }
+      (hands2 || []).forEach(drawHand);
+      return;
+    }
+    const g = cx.createLinearGradient(0, 0, W, H); g.addColorStop(0, '#171b21'); g.addColorStop(1, '#0d1014'); cx.fillStyle = g; cx.fillRect(0, 0, W, H);
+    cx.strokeStyle = 'rgba(255,255,255,.05)'; cx.lineWidth = 1; cx.beginPath(); for (let y = 0; y < H; y += 60) { cx.moveTo(0, y + .5); cx.lineTo(W, y + .5); } cx.stroke();
+    cx.fillStyle = 'rgba(255,255,255,.07)'; cx.fillRect(W * .12 + Math.sin(t * .3) * 20, H * .52, 300, 160);   // table
+    cx.fillStyle = 'rgba(255,255,255,.12)'; cx.beginPath(); cx.roundRect(W * .66 + Math.sin(t * .7) * 30, H * .46, 90, 120, 10); cx.fill(); // cup
+    cx.fillStyle = V('--text-dim'); cx.font = font(18); cx.textAlign = 'right'; cx.textBaseline = 'bottom'; cx.fillText('chest-cam placeholder', W - 16, H - 14);
+    if (hand) drawHand(hand);
+  }
+  function drawHand(hand) {
+    const W = cc.width, H = cc.height;
+    {
+      const P = j => [j[0] * W, j[1] * H];
+      cx.strokeStyle = C.real; cx.lineWidth = 4; cx.lineCap = 'round'; cx.shadowColor = C.real; cx.shadowBlur = 10; cx.beginPath();
+      for (const s of CH) { let p = P(hand[0]); cx.moveTo(p[0], p[1]); for (let k = 0; k < 4; k++) { p = P(hand[s + k]); cx.lineTo(p[0], p[1]); } }
+      cx.stroke(); cx.shadowBlur = 0; cx.fillStyle = C.real;
+      hand.forEach((j, i) => { const p = P(j); cx.beginPath(); cx.arc(p[0], p[1], i === 0 ? 9 : 6, 0, 7); cx.fill(); });
+    }
+  }
+  function frame(ts) { if (root.classList.contains('on')) { drawPlot(); drawCam(ts); } requestAnimationFrame(frame); }
+  requestAnimationFrame(frame);
+
+  /* ---- controls ---- */
+  let recOn = false, recT0 = 0;
+  const btn = $('rc-rec'), txt = $('rc-rectxt'), fmt = s => String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(Math.floor(s % 60)).padStart(2, '0');
+  async function post(path, body) {
+    try { const r = await fetch((M.api || '') + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) }); return await r.json(); } catch (e) { return null; /* offline demo */ }
+  }
+  /* ---- live camera (Continuity Camera via getUserMedia) + MediaPipe Tasks JS + MediaRecorder ---- */
+  const video = $('rc-video'); let detGap = 33, camRetry = null; let landmarker = null, lastDet = 0, stream = null, recorder = null, chunks = [], curEp = null;
+  async function startCam() { await openCam(); loadHands(); }
+  async function openCam() {
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ video: { width: 1920, height: 1080 }, audio: true });
+      const devs = await navigator.mediaDevices.enumerateDevices();
+      const iph = devs.find(d => d.kind === 'videoinput' && /iphone|continuity/i.test(d.label));
+      const curId = stream.getVideoTracks()[0].getSettings().deviceId;
+      if (iph && iph.deviceId !== curId) {
+        stream.getTracks().forEach(t => t.stop());
+        stream = await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: iph.deviceId }, width: 1920, height: 1080 }, audio: true });
+      }
+      video.srcObject = stream; await video.play(); M.camera = true;
+      const tr = stream.getVideoTracks()[0], st = tr.getSettings(); $('rc-fps').textContent = Math.round(st.frameRate || 30) + ' fps · ' + st.height + 'p';
+      tr.onended = () => { console.warn('camera track ended, reconnecting'); M.camera = false; retryCam(); };
+      tr.onmute = () => { M.camera = false; }; tr.onunmute = () => { M.camera = true; };
+    } catch (e) { console.warn('camera', e); M.camera = false; $('rc-fps').textContent = 'no camera · retrying'; retryCam(); }
+  }
+  function retryCam() { if (camRetry) return; camRetry = setTimeout(() => { camRetry = null; if (stream) stream.getTracks().forEach(t => t.stop()); stream = null; openCam(); }, 2000); }
+  // watchdog: a frozen stream (Continuity Camera dropped, phone locked) -> reopen
+  let lastVT = -1, frozenFor = 0;
+  setInterval(() => {
+    if (window.MIMESIS_DEMO || !stream || recorder) return;
+    if (video.currentTime === lastVT) { if (++frozenFor >= 3) { frozenFor = 0; console.warn('camera frozen, reopening'); M.camera = false; retryCam(); } } else frozenFor = 0;
+    lastVT = video.currentTime;
+  }, 1000);
+  async function loadHands() {
+    try {
+      const { FilesetResolver, HandLandmarker } = await import('./vendor/mediapipe/vision_bundle.mjs');
+      const fs = await FilesetResolver.forVisionTasks('./vendor/mediapipe/wasm');
+      landmarker = await HandLandmarker.createFromOptions(fs, { baseOptions: { modelAssetPath: './vendor/mediapipe/hand_landmarker.task', delegate: 'GPU' }, runningMode: 'VIDEO', numHands: 2 });
+    } catch (e) { console.warn('mediapipe js failed, skeleton comes from hands.py overlay MP4 after processing', e); }
+  }
+  if (!window.MIMESIS_DEMO) startCam();
+  function startRecorder() {
+    if (!stream || !window.MediaRecorder) return;
+    chunks = []; const mt = ['video/mp4', 'video/webm;codecs=vp9,opus', 'video/webm'].find(t => MediaRecorder.isTypeSupported(t));
+    recorder = new MediaRecorder(stream, mt ? { mimeType: mt, videoBitsPerSecond: 8e6 } : {});
+    recorder.ondataavailable = e => e.data.size && chunks.push(e.data); recorder.start(1000);
+  }
+  function stopRecorder(ep) {
+    if (!recorder) return; const rec = recorder; recorder = null;
+    rec.onstop = async () => {
+      const blob = new Blob(chunks, { type: rec.mimeType }); const fd = new FormData();
+      if (blob.size < 10000) { $('rc-livetxt').textContent = 'NO VIDEO · camera?'; await post('/process/' + ep); setTimeout(() => $('rc-livetxt').textContent = 'LIVE', 3000); return; }
+      fd.append('file', blob, ep + (rec.mimeType.includes('mp4') ? '.mp4' : '.webm'));
+      $('rc-livetxt').textContent = 'UPLOADING';
+      try { await fetch('/upload/' + ep, { method: 'POST', body: fd }); $('rc-livetxt').textContent = 'PROCESSING'; await post('/process/' + ep); }
+      catch (e) { console.warn('upload', e); }
+      setTimeout(() => $('rc-livetxt').textContent = 'LIVE', 3000);
+    };
+    rec.stop();
+  }
+  btn.addEventListener('click', () => {
+    recOn = !recOn; root.classList.toggle('recording', recOn);
+    if (recOn) { recT0 = performance.now(); txt.textContent = '00:00'; $('rc-livetxt').textContent = 'REC';
+      if (!window.MIMESIS_DEMO) post('/episode/start', { task: $('rc-task').value }).then(r => { curEp = r && r.episode_id; startRecorder(); });
+    } else { txt.textContent = 'RECORD'; $('rc-livetxt').textContent = 'LIVE';
+      if (!window.MIMESIS_DEMO) { const ep = curEp; post('/episode/stop').then(() => ep && stopRecorder(ep)); }
+    }
+    M.emit('rec', { on: recOn, t0: recT0 / 1000 });
+  });
+  setInterval(() => { $('rc-clock').textContent = new Date().toTimeString().slice(0,8); if (recOn) txt.textContent = fmt((performance.now() - recT0) / 1000); }, 250);
+  // WIRE: GET /status -> M.emit('status'); GET /latest -> M.emit('imu'/'hand'/'contact') when !MIMESIS_DEMO
+}; window.M ? init() : addEventListener('DOMContentLoaded', init); })();
+</script>
+
+<section id="scr-episode" class="screen">
+  <aside class="rail">
+    <div class="rail-top">
+      <button class="rail-toggle" title="Collapse rail" aria-label="Collapse rail"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M9 4v16"/></svg></button>
+      <div class="stats">
+        <div><span class="k">Real episodes</span><b class="mono" id="ep-st-eps">6</b></div>
+        <div><span class="k">Frames</span><b class="mono" id="ep-st-frames">2,160</b></div>
+        <div><span class="k">FPS</span><b class="mono" id="ep-st-fps">30</b></div>
+      </div>
+    </div>
+    <div class="rail-h">Episodes</div>
+    <div class="eplist" id="ep-list"></div>
+  </aside>
+
+  <div class="center">
+    <header class="hd">
+      <div class="logo"><svg viewBox="0 0 34 34" width="34" height="34" aria-hidden="true"><rect x="3" y="7" width="17" height="22" rx="8.5" class="lr"/><rect x="13" y="4" width="17" height="22" rx="8.5" class="ls"/></svg></div>
+      <div>
+        <div class="ds">mimesis/real_demo_v1</div>
+        <div class="sub mono">EPISODE <span id="ep-hd-n">0</span> · <span id="ep-hd-task">pick up the cup</span></div>
+      </div>
+    </header>
+
+    <div class="vids">
+      <div class="vp real" id="ep-vp-real">
+        <div class="vh"><span class="dot"></span><b>Real · chest-cam</b><i>REAL</i></div>
+        <div class="vb"><canvas id="ep-cv-real" width="568" height="320"></canvas>
+          <!-- WIRE: GET /files/episode_overlay.mp4 (chest-cam + hand skeleton overlay). Replaces the canvas once it loads. -->
+          <video id="ep-v-real" muted playsinline preload="auto" loop></video></div>
+      </div>
+      <div class="vp sim" id="ep-vp-sim">
+        <div class="vh"><span class="dot"></span><b>Sim · MuJoCo twin</b><i>SIM</i></div>
+        <div class="vb"><canvas id="ep-cv-sim" width="568" height="320"></canvas>
+          <!-- WIRE: GET /files/sim_twin.mp4 (robot replaying the human trajectory). -->
+          <video id="ep-v-sim" muted playsinline preload="auto" loop></video></div>
+      </div>
+    </div>
+
+    <div class="bar">
+      <button class="ib" id="ep-b-start" title="Start"><svg viewBox="0 0 24 24" width="26" height="26" fill="currentColor"><path d="M6 5h2.5v14H6zM19 5v14L9.5 12z"/></svg></button>
+      <button class="ib" id="ep-b-back" title="-1 s"><svg viewBox="0 0 24 24" width="26" height="26" fill="currentColor"><path d="M12 6v12L2.5 12zM21.5 6v12L12 12z"/></svg></button>
+      <button class="ib play" id="ep-b-play" title="Play / pause"></button>
+      <button class="ib" id="ep-b-fwd" title="+1 s"><svg viewBox="0 0 24 24" width="26" height="26" fill="currentColor"><path d="M12 6v12l9.5-6zM2.5 6v12L12 12z"/></svg></button>
+      <button class="ib" id="ep-b-end" title="End"><svg viewBox="0 0 24 24" width="26" height="26" fill="currentColor"><path d="M15.5 5H18v14h-2.5zM5 5v14l9.5-7z"/></svg></button>
+      <div class="scrub" id="ep-scrub"><div class="st"></div><div class="sf" id="ep-sf"></div><div class="th" id="ep-th"></div></div>
+      <div class="tm"><span class="mono big" id="ep-tm">00:00.00</span><span class="mono tot" id="ep-tot">/ 00:12.00</span><span class="mono fr" id="ep-fr">frame 0 / 360</span></div>
+      <label class="spd"><select id="ep-speed"><option value="0.25">0.25×</option><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select></label>
+      <div class="keys"><span><kbd>Space</kbd> play / pause</span><span><kbd>←</kbd><kbd>→</kbd> frame <kbd>Shift</kbd> 1 s</span></div>
+    </div>
+
+    <div class="tracks"><canvas id="ep-cv-tr"></canvas></div>
+  </div>
+
+  <aside class="meta">
+    <div class="mh">Episode metadata</div>
+    <div class="kv"><span class="k">Task</span><b class="v task" id="ep-m-task">—</b></div>
+    <div class="kv"><span class="k">Duration</span><b class="v mono" id="ep-m-dur">—</b></div>
+    <div class="kv"><span class="k">Sync offset</span><b class="v mono" id="ep-m-sync">—</b></div>
+    <div class="kv"><span class="k">Contacts detected</span><b class="v mono" id="ep-m-con">—</b></div>
+    <div class="kv"><span class="k">Frames</span><b class="v mono" id="ep-m-fr">—</b></div>
+    <div class="mh sm">Contact log</div>
+    <div class="clog" id="ep-clog"></div>
+  </aside>
+</section>
+
+<style>
+#scr-episode{--rail-w:300px;display:none;background:var(--bg)}
+#scr-episode.on{display:flex}
+#scr-episode *{box-sizing:border-box}
+#scr-episode .mono{font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+#scr-episode .k{font-size:var(--fs-sm);color:var(--text-muted);letter-spacing:var(--tracking-caps);text-transform:uppercase}
+#scr-episode button{font-family:inherit;cursor:pointer}
+
+/* rail */
+#scr-episode .rail{width:var(--rail-w);flex:none;height:100%;border-right:1px solid var(--line);background:var(--bg);display:flex;flex-direction:column;transition:width var(--t-med) var(--ease);overflow:hidden}
+#scr-episode .rail-top{padding:var(--sp-4);display:flex;gap:var(--sp-3);align-items:flex-start;border-bottom:1px solid var(--line)}
+#scr-episode .rail-toggle{flex:none;width:44px;height:44px;border-radius:var(--r-md);border:1px solid var(--line);background:var(--surface);color:var(--text-muted);display:grid;place-items:center;transition:color var(--t-fast),background var(--t-fast)}
+#scr-episode .rail-toggle:hover{color:var(--text);background:var(--surface-2)}
+#scr-episode .stats{display:flex;flex-direction:column;gap:var(--sp-2);min-width:0;flex:1}
+#scr-episode .stats div{display:flex;justify-content:space-between;align-items:baseline;gap:var(--sp-2);white-space:nowrap}
+#scr-episode .stats .k{font-size:var(--fs-xs)}
+#scr-episode .stats b{font-size:var(--fs-lg);font-weight:500;color:var(--real)}
+#scr-episode .rail-h{padding:var(--sp-4) var(--sp-4) var(--sp-2);font-size:var(--fs-xs);color:var(--text-muted);letter-spacing:var(--tracking-caps);text-transform:uppercase;white-space:nowrap}
+#scr-episode .eplist{flex:1;overflow-y:auto;padding:0 var(--sp-3);display:flex;flex-direction:column;gap:var(--sp-1)}
+#scr-episode .ep{display:flex;align-items:center;gap:var(--sp-3);padding:var(--sp-2);border-radius:var(--r-md);border:1px solid transparent;cursor:pointer;color:var(--text);transition:background var(--t-fast)}
+#scr-episode .ep:hover{background:var(--surface)}
+#scr-episode .ep.on{background:var(--real-soft);border-color:var(--real);color:var(--real)}
+#scr-episode .ep canvas{flex:none;width:80px;height:50px;border-radius:var(--r-sm);border:1px solid var(--line-strong);background:var(--surface)}
+#scr-episode .ep .tx{min-width:0;white-space:nowrap}
+#scr-episode .ep .tx b{display:block;font-size:var(--fs-md);font-weight:500}
+#scr-episode .ep .tx span{display:block;font-size:var(--fs-sm);color:var(--text-muted);overflow:hidden;text-overflow:ellipsis}
+#scr-episode .ep.on .tx span{color:var(--text)}
+#scr-episode.collapsed{--rail-w:104px}
+#scr-episode.collapsed .stats,#scr-episode.collapsed .rail-h,#scr-episode.collapsed .ep .tx{display:none}
+#scr-episode.collapsed .rail-top{justify-content:center;padding:var(--sp-4) 0}
+#scr-episode.collapsed .ep{justify-content:center}
+
+/* center */
+#scr-episode .center{flex:1;min-width:0;height:100%;padding:var(--sp-4) var(--sp-5) var(--sp-4);display:flex;flex-direction:column;gap:var(--sp-3)}
+#scr-episode .hd{display:flex;align-items:center;gap:var(--sp-4);height:52px;flex:none}
+#scr-episode .logo{width:72px;height:44px;border-radius:var(--r-md);background:var(--surface);border:1px solid var(--line);display:grid;place-items:center}
+#scr-episode .logo .lr{fill:var(--real)} #scr-episode .logo .ls{fill:none;stroke:var(--sim);stroke-width:2.5}
+#scr-episode .ds{font-size:var(--fs-lg);font-weight:600;line-height:1.1}
+#scr-episode .sub{font-size:var(--fs-sm);color:var(--text-muted);letter-spacing:var(--tracking-caps);margin-top:2px}
+#scr-episode .vids{display:flex;gap:var(--sp-4);flex:none}
+#scr-episode .vp{flex:1;min-width:0;border-radius:var(--r-md);overflow:hidden;background:var(--surface);border:2px solid var(--c)}
+#scr-episode .vp.real{--c:var(--real);--cs:var(--real-soft)} #scr-episode .vp.sim{--c:var(--sim);--cs:var(--sim-soft)}
+#scr-episode .vh{height:38px;display:flex;align-items:center;gap:var(--sp-3);padding:0 var(--sp-3);background:var(--cs);border-bottom:1px solid var(--c)}
+#scr-episode .vh .dot{width:12px;height:12px;border-radius:50%;background:var(--c)}
+#scr-episode .vh b{font-size:var(--fs-md);font-weight:600;color:var(--text)}
+#scr-episode .vh i{margin-left:auto;font-style:normal;font-family:var(--font-mono);font-size:var(--fs-xs);font-weight:700;letter-spacing:var(--tracking-caps);background:var(--c);color:var(--on-accent);padding:2px 8px;border-radius:var(--r-sm)}
+#scr-episode .vb{position:relative;width:100%;aspect-ratio:16/9;background:var(--bg)}
+#scr-episode .vb canvas,#scr-episode .vb video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+#scr-episode .vb video{display:none;background:var(--bg)}
+#scr-episode .vb.live video{display:block}
+
+/* playback bar */
+#scr-episode .bar{flex:none;height:76px;display:flex;align-items:center;gap:var(--sp-3);padding:0 var(--sp-4);background:var(--surface);border:1px solid var(--line-strong);border-radius:var(--r-lg)}
+#scr-episode .ib{width:46px;height:46px;border-radius:var(--r-md);border:1px solid transparent;background:transparent;color:var(--text);display:grid;place-items:center;flex:none;transition:background var(--t-fast)}
+#scr-episode .ib:hover{background:var(--surface-2)}
+#scr-episode .ib.play{width:56px;height:56px;border-color:var(--real);background:var(--real-soft);color:var(--real);margin:0 var(--sp-1)}
+#scr-episode .scrub{position:relative;flex:1;min-width:120px;height:40px;cursor:pointer;touch-action:none}
+#scr-episode .scrub .st{position:absolute;left:0;right:0;top:18px;height:4px;border-radius:2px;background:var(--line-strong)}
+#scr-episode .scrub .sf{position:absolute;left:0;top:18px;height:4px;border-radius:2px;background:var(--real);width:0}
+#scr-episode .scrub .th{position:absolute;top:9px;width:22px;height:22px;margin-left:-11px;border-radius:50%;background:var(--real);box-shadow:0 0 0 5px var(--real-soft)}
+#scr-episode .tm{display:flex;flex-direction:column;align-items:flex-end;flex:none;line-height:1.15}
+#scr-episode .tm .big{font-size:var(--fs-lg);color:var(--text);font-weight:500}
+#scr-episode .tm .tot{font-size:var(--fs-sm);color:var(--text-muted)}
+#scr-episode .tm .fr{display:none}
+#scr-episode .tm{display:grid;grid-template-columns:auto auto;align-items:baseline;column-gap:var(--sp-2)}
+#scr-episode .tm .fr{display:block;grid-column:1/3;text-align:right;font-size:var(--fs-xs);color:var(--text-muted)}
+#scr-episode .spd select{height:44px;padding:0 var(--sp-3);font-family:var(--font-mono);font-size:var(--fs-md);color:var(--text);background:var(--surface-2);border:1px solid var(--line-strong);border-radius:var(--r-md)}
+#scr-episode .keys{display:flex;flex-direction:column;gap:6px;font-size:var(--fs-xs);color:var(--text-muted);white-space:nowrap;flex:none}
+#scr-episode kbd{font-family:var(--font-mono);font-size:var(--fs-xs);color:var(--text);background:var(--surface-2);border:1px solid var(--line-strong);border-radius:var(--r-sm);padding:1px 6px;margin-right:4px}
+
+/* tracks */
+#scr-episode .tracks{flex:1;min-height:0;background:var(--surface);border:1px solid var(--line-strong);border-radius:var(--r-lg);overflow:hidden;position:relative}
+#scr-episode .tracks canvas{position:absolute;inset:0;width:100%;height:100%;cursor:col-resize;touch-action:none}
+
+/* right panel */
+#scr-episode .meta{width:420px;flex:none;height:100%;border-left:1px solid var(--line);padding:var(--sp-5);display:flex;flex-direction:column;gap:var(--sp-4);overflow:hidden}
+#scr-episode .mh{font-size:var(--fs-sm);color:var(--text-muted);letter-spacing:var(--tracking-caps);text-transform:uppercase;padding-bottom:var(--sp-3);border-bottom:1px solid var(--line)}
+#scr-episode .mh.sm{margin-top:var(--sp-2)}
+#scr-episode .kv{display:flex;flex-direction:column;gap:2px}
+#scr-episode .kv .v{font-size:var(--fs-xl);font-weight:500;color:var(--text);line-height:1.1}
+#scr-episode .kv .v.task{font-family:var(--font-ui);font-size:var(--fs-lg);font-weight:600;line-height:1.2;color:var(--real)}
+#scr-episode .kv .v.mono{font-family:var(--font-mono)}
+#scr-episode .clog{display:flex;flex-direction:column;gap:var(--sp-2);flex:1;min-height:0}
+#scr-episode .cl{display:flex;align-items:center;gap:var(--sp-3);height:36px;padding:0 var(--sp-3);border-radius:var(--r-sm);background:var(--surface);border-left:6px solid var(--c);font-size:var(--fs-md);transition:background var(--t-fast)}
+#scr-episode .cl b{font-family:var(--font-mono);font-weight:700;color:var(--c);width:110px}
+#scr-episode .cl span{font-family:var(--font-mono);color:var(--text-muted);font-size:var(--fs-sm)}
+#scr-episode .cl.hit{background:var(--surface-2)}
+</style>
+
+<script>
+(() => {
+  const root = document.getElementById('scr-episode');
+  const $ = id => document.getElementById(id);
+  const css = getComputedStyle(root);
+  const V = n => css.getPropertyValue(n).trim();
+  const FPS = 30;
+  const KIND_VAR = { 'GRAB': '--ev-grab', 'TAP': '--ev-tap', 'SLIP': '--ev-slip', 'SET-DOWN': '--ev-setdown' };
+
+  // ---------- episodes (demo list) ----------
+  // WIRE: GET /files/dataset_stats.json -> {episodes:[{n,task,duration}], frames, fps}; per-episode GET /files/episode_<n>.json
+  let EPS = [
+    { n: 0, task: 'Pick up the cup', dur: 12 }, { n: 1, task: 'Stack two blocks', dur: 12 },
+    { n: 2, task: 'Pour into bowl', dur: 12 }, { n: 3, task: 'Open the drawer', dur: 12 },
+    { n: 4, task: 'Hand over the bottle', dur: 12 }, { n: 5, task: 'Wipe the table', dur: 12 }
+  ];
+  let cur = 0, E = null;          // E = current episode data
+  let t = 0, playing = true, speed = 1, last = performance.now();
+
+  function rnd(seed) { let s = seed * 9301 + 49297; return () => (s = (s * 9301 + 49297) % 233280) / 233280; }
+
+  // fake a 12 s episode with 5 contacts. Used when /files/episode_<n>.json is missing or MIMESIS_DEMO.
+  function demoEpisode(n) {
+    const r = rnd(n + 3);
+    const j = () => (r() - .5) * .3 * (n ? 1 : 0);
+    const contacts = [['GRAB', 2.1], ['TAP', 4.3], ['SLIP', 5.7], ['GRAB', 7.2], ['SET-DOWN', 9.8]].map(([kind, tt]) => ({ kind, t: +(tt + j()).toFixed(2) }));
+    const grabs = contacts.filter(c => c.kind === 'GRAB' || c.kind === 'SET-DOWN');
+    const gripper = [{ t0: 0, t1: contacts[0].t, state: 'open' }, { t0: contacts[0].t, t1: contacts[2].t, state: 'closed' },
+      { t0: contacts[2].t, t1: contacts[3].t, state: 'open' }, { t0: contacts[3].t, t1: contacts[4].t, state: 'closed' }, { t0: contacts[4].t, t1: 12, state: 'open' }];
+    const dur = 12, N = dur * 100, imu = new Float32Array(N);
+    for (let i = 0; i < N; i++) {
+      const tt = i / 100; let a = 9.81 + Math.sin(tt * 1.3 + n) * .7 + Math.sin(tt * 3.1) * .3 + (r() - .5) * .5;
+      contacts.forEach(c => { const d = tt - c.t; if (d > 0 && d < .5) a += Math.exp(-d * 10) * 7 * Math.sin(d * 70) * (c.kind === 'SLIP' ? 1.3 : 1); });
+      imu[i] = a;
+    }
+    return { n, task: (EPS[n] || EPS[0]).task, duration: dur, fps: FPS, frames: dur * FPS, sync_offset_ms: [38, 41, 35, 44, 39, 42][n], contacts, gripper, imu, imu_hz: 100 };
+  }
+
+  async function loadEpisode(n) {
+    let d = null;
+    try { // WIRE: GET /files/episode_<n>.json
+      const r = await fetch((M.api || '') + '/files/episode_' + n + '.json?' + Date.now(), { cache: 'no-store' }); if (r.ok) d = await r.json();
+    } catch (e) {}
+    if (d) {
+      d.imu = Float32Array.from(d.imu || []); d.imu_hz = d.imu_hz || 100; d.fps = d.fps || FPS;
+      d.frames = d.frames || Math.round(d.duration * d.fps); d.contacts = d.contacts || []; d.gripper = d.gripper || [];
+      d.task = d.task || (EPS[n] || {}).task || 'episode';
+    } else d = demoEpisode(n % 6);
+    let mx = 0, mn = 1e9; for (const v of d.imu) { if (v > mx) mx = v; if (v < mn) mn = v; }
+    d.imuLo = mn > 6 ? 4 : 0; d.imuHi = mn > 6 ? 20 : Math.max(4, Math.ceil(mx * 1.1 / 2) * 2);
+    d.n = n; return d;
+  }
+
+  const fmtT = s => { s = Math.max(0, s); const m = Math.floor(s / 60), x = Math.floor(s % 60), f = Math.min(FPS - 1, Math.floor((s % 1) * FPS)); return String(m).padStart(2, '0') + ':' + String(x).padStart(2, '0') + '.' + String(f).padStart(2, '0'); };
+
+  async function select(n) {
+    cur = n; const d = await loadEpisode(n); if (cur !== n) return; E = d; t = 0;
+    root.querySelectorAll('.ep').forEach((e, i) => e.classList.toggle('on', EPS.length - 1 - i === n));
+    if (!window.MIMESIS_DEMO) { $('ep-st-eps').textContent = EPS.length; $('ep-st-frames').textContent = EPS.reduce((a, e) => a + Math.round((e.dur || 0) * 30), 0).toLocaleString('en-US'); }
+    $('ep-hd-n').textContent = n; $('ep-hd-task').textContent = d.task.toLowerCase();
+    $('ep-m-task').textContent = d.task; $('ep-m-dur').textContent = d.duration.toFixed(1) + ' s';
+    $('ep-m-sync').textContent = '+' + d.sync_offset_ms + ' ms'; $('ep-m-con').textContent = d.contacts.length;
+    $('ep-m-fr').textContent = d.frames.toLocaleString('en-US'); $('ep-tot').textContent = '/ ' + fmtT(d.duration);
+    $('ep-clog').innerHTML = d.contacts.map((c, i) => `<div class="cl" data-i="${i}" style="--c:var(${KIND_VAR[c.kind]})"><b>${c.kind}</b><span>${fmtT(c.t)}</span></div>`).join('');
+    // WIRE: per-episode videos; falls back to the canvas placeholder if the file is missing
+    attachVideo('real', d.overlay || '/files/episode_overlay.mp4'); attachVideo('sim', d.twin || '/files/sim_twin.mp4');
+  }
+
+  // ---------- rail ----------
+  const list = $('ep-list');
+  function buildRail() { list.innerHTML = '';
+  EPS.forEach((e, i) => {
+    const el = document.createElement('div'); el.className = 'ep';
+    el.innerHTML = `<canvas width="160" height="100"></canvas><div class="tx"><b>Episode ${e.n}</b><span>${e.task}</span></div>`;
+    el.onclick = () => select(i); list.prepend(el);
+    const c = el.firstChild.getContext('2d'), r = rnd(i + 11);
+    const g = c.createLinearGradient(0, 0, 160, 100); g.addColorStop(0, V('--surface-2')); g.addColorStop(1, V('--bg'));
+    c.fillStyle = g; c.fillRect(0, 0, 160, 100);
+    c.fillStyle = V('--line-strong'); c.fillRect(0, 78, 160, 22);
+    c.fillStyle = V('--real'); c.beginPath(); c.arc(30 + r() * 30, 40 + r() * 20, 11, 0, 7); c.fill();
+    c.strokeStyle = V('--real'); c.lineWidth = 4; c.beginPath(); c.moveTo(40, 55); c.quadraticCurveTo(80, 20 + r() * 40, 110 + r() * 20, 58); c.stroke();
+    c.fillStyle = V('--text-muted'); c.fillRect(100 + r() * 30, 60, 22, 18);
+  });
+  }
+  root.querySelector('.rail-toggle').onclick = () => { root.classList.toggle('collapsed'); setTimeout(layout, 360); };
+
+  // ---------- videos ----------
+  const vids = { real: $('ep-v-real'), sim: $('ep-v-sim') };
+  function attachVideo(k, src) {
+    const v = vids[k], box = v.parentNode; box.classList.remove('live');
+    v.onloadeddata = () => box.classList.add('live'); v.onerror = () => box.classList.remove('live');
+    v.src = (M.api || '') + src; v.load();
+  }
+  const live = k => vids[k].parentNode.classList.contains('live') && vids[k].readyState >= 2;
+  function syncVideos() {
+    ['real', 'sim'].forEach(k => {
+      if (!live(k)) return; const v = vids[k];
+      const off = k === 'sim' ? 0 : 0;    // sync offset already baked into episode_overlay.mp4 / sim_twin.mp4
+      if (Math.abs(v.currentTime - (t + off)) > (playing ? .15 : .01)) v.currentTime = t + off;
+      v.playbackRate = speed;
+      if (playing && v.paused) v.play().catch(() => {}); else if (!playing && !v.paused) v.pause();
+    });
+  }
+
+  // ---------- placeholder scenes (same trajectory, amber hand vs cyan gripper) ----------
+  const ss = x => x * x * (3 - 2 * x), cl = (x, a, b) => Math.max(a, Math.min(b, x));
+  function pose(tt) {   // normalized hand position + holding state from episode data
+    const C = E.contacts, tg = C[0].t, tr = C[C.length - 1].t;
+    const A = [.22, .70], B = [.42, .62], D = [.74, .50], R = [.86, .72];
+    const mix = (p, q, u) => [p[0] + (q[0] - p[0]) * ss(cl(u, 0, 1)), p[1] + (q[1] - p[1]) * ss(cl(u, 0, 1)) - Math.sin(Math.PI * cl(u, 0, 1)) * .06];
+    if (tt < tg) return mix(A, B, tt / tg);
+    if (tt < tr) return mix(B, D, (tt - tg) / (tr - tg));
+    return mix(D, R, (tt - tr) / 2);
+  }
+  function closedAt(tt) { const g = E.gripper.find(s => tt >= s.t0 && tt < s.t1); return g && g.state === 'closed'; }
+  function drawScene(cv, kind) {
+    const w = cv.width, h = cv.height, c = cv.getContext('2d'), p = pose(t), x = p[0] * w, y = p[1] * h, held = closedAt(t);
+    const col = V(kind === 'real' ? '--real' : '--sim');
+    const g = c.createLinearGradient(0, 0, w, h); g.addColorStop(0, V('--surface-2')); g.addColorStop(1, V('--bg')); c.fillStyle = g; c.fillRect(0, 0, w, h);
+    c.fillStyle = V('--surface'); c.fillRect(0, h * .78, w, h * .22); c.strokeStyle = V('--line-strong'); c.lineWidth = 1; c.beginPath(); c.moveTo(0, h * .78); c.lineTo(w, h * .78); c.stroke();
+    if (kind === 'sim') { c.strokeStyle = V('--sim-soft'); for (let i = 0; i < w; i += 40) { c.beginPath(); c.moveTo(i, h * .78); c.lineTo(i * 1.0 + (i - w / 2) * .5, h); c.stroke(); } }
+    // object: at start spot until grabbed, follows hand while held, rests at D after set-down
+    const C = E.contacts, tg = C[0].t, tr = C[C.length - 1].t, B = [.42, .62], D = [.74, .50];
+    let ox = (t < tg ? B[0] : t < tr ? p[0] : D[0]) * w, oy = (t < tg ? B[1] : t < tr ? p[1] : D[1]) * h + 26;
+    c.fillStyle = V('--text-muted'); c.fillRect(ox - 20, oy - 20, 40, 40); c.fillStyle = V('--text-dim'); c.fillRect(ox - 20, oy - 20, 40, 8);
+    // flash when a contact fires
+    E.contacts.forEach(ct => { const d = t - ct.t; if (d >= 0 && d < .4) { c.strokeStyle = V(KIND_VAR[ct.kind]); c.globalAlpha = 1 - d / .4; c.lineWidth = 4; c.beginPath(); c.arc(x, y + 20, 30 + d * 120, 0, 7); c.stroke(); c.globalAlpha = 1; } });
+    c.fillStyle = col; c.strokeStyle = col;
+    if (kind === 'real') {                         // amber hand: palm + fingers curl when holding
+      c.beginPath(); c.arc(x, y, 26, 0, 7); c.fill(); c.lineWidth = 7; c.lineCap = 'round';
+      for (let f = -2; f <= 2; f++) { const a = -Math.PI / 2 + f * .28, L = held ? 22 : 40; c.beginPath(); c.moveTo(x + Math.cos(a) * 20, y + Math.sin(a) * 20); c.lineTo(x + Math.cos(a) * (20 + L) * (held ? .8 : 1) + (held ? f * -6 : 0), y + Math.sin(a) * (20 + L) + (held ? 14 : 0)); c.stroke(); }
+      c.lineWidth = 2; c.globalAlpha = .6; c.beginPath(); c.moveTo(x, y + 26); c.lineTo(x - 30, h); c.stroke(); c.globalAlpha = 1;
+    } else {                                      // cyan parallel-jaw gripper, follows state
+      const gap = held ? 22 : 46; c.lineWidth = 9; c.lineCap = 'round';
+      c.beginPath(); c.moveTo(x - gap, y - 30); c.lineTo(x - gap, y + 18); c.moveTo(x + gap, y - 30); c.lineTo(x + gap, y + 18); c.moveTo(x - gap, y - 30); c.lineTo(x + gap, y - 30); c.stroke();
+      c.lineWidth = 12; c.beginPath(); c.moveTo(x, y - 30); c.lineTo(x + 10, 0); c.stroke();
+    }
+    c.fillStyle = V('--text'); c.font = '600 14px ' + V('--font-mono'); c.fillText(kind === 'real' ? 'chest-cam · placeholder' : 'MuJoCo twin · placeholder', 12, h - 12);
+  }
+
+  // ---------- tracks ----------
+  const tc = $('ep-cv-tr'), tctx = tc.getContext('2d');
+  const LBL = 170, PADR = 20;   // label column, right pad
+  let TW = 0, TH = 0, dpr = 1;
+  function layout() {
+    dpr = window.devicePixelRatio || 1; TW = tc.clientWidth; TH = tc.clientHeight;
+    if (!TW) return; tc.width = TW * dpr; tc.height = TH * dpr; tctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  const X = tt => LBL + (tt / E.duration) * (TW - LBL - PADR);
+  function rows() { const top = 36, av = TH - top - 8, a = av * .44, b = av * .26; return { ruler: [0, top], imu: [top, top + a], grip: [top + a, top + a + b], con: [top + a + b, top + av] }; }
+  function drawTracks() {
+    const c = tctx, R = rows(), mono = V('--font-mono');
+    c.clearRect(0, 0, TW, TH);
+    const line = V('--line'), ls = V('--line-strong'), mut = V('--text-muted'), real = V('--real'), sim = V('--sim'), oa = V('--on-accent');
+    // ruler
+    c.font = '500 14px ' + mono; c.fillStyle = mut; c.textBaseline = 'middle'; c.textAlign = 'left';
+    for (let s = 0; s <= E.duration; s++) { const x = X(s); c.strokeStyle = s % 2 ? line : ls; c.beginPath(); c.moveTo(x, s % 2 ? 26 : 20); c.lineTo(x, 36); c.stroke();
+      if (s % 2 === 0 && x + 44 < TW) c.fillText('+' + s + 's', x + 4, 12); }
+    // row separators + labels
+    const vid = E && E.signal; const lab = [['imu', vid ? 'FINGER OPENING' : 'IMU |a|', vid ? 'cm, from video' : 'm/s²', real], ['grip', 'GRIPPER', 'sim robot', sim], ['con', 'CONTACTS', vid ? 'from video' : 'from IMU', V('--text')]];
+    lab.forEach(([k, a, b, col]) => { const [y0, y1] = R[k]; c.strokeStyle = ls; c.beginPath(); c.moveTo(0, y0 + .5); c.lineTo(TW, y0 + .5); c.stroke();
+      c.fillStyle = col; c.font = '600 16px ' + V('--font-ui'); c.fillText(a, 16, y0 + 24); c.fillStyle = mut; c.font = '400 14px ' + V('--font-ui'); c.fillText(b, 16, y0 + 46); });
+    c.strokeStyle = ls; c.beginPath(); c.moveTo(LBL + .5, 0); c.lineTo(LBL + .5, TH); c.stroke();
+    // vertical grid
+    c.strokeStyle = line; for (let s = 0; s <= E.duration; s += 2) { const x = X(s); c.beginPath(); c.moveTo(x, 36); c.lineTo(x, TH); c.stroke(); }
+    // IMU line (amber = real)
+    { const [y0, y1] = R.imu, pad = 12, lo = E.imuLo, hi = E.imuHi, Y = a => y1 - pad - (cl(a, lo, hi) - lo) / (hi - lo) * (y1 - y0 - pad * 2), n = E.imu.length, hz = E.imu_hz;
+      c.fillStyle = mut; c.font = '400 14px ' + mono; c.textAlign = 'right'; [[hi, String(hi)], [(hi + lo) / 2, String(Math.round((hi + lo) / 2))], [lo, String(lo)]].forEach(([v, s]) => c.fillText(s, LBL - 8, Y(v)));
+      c.textAlign = 'left'; c.beginPath(); const step = Math.max(1, Math.floor(n / (TW * 2)));
+      for (let i = 0; i < n; i += step) { const x = X(i / hz), y = Y(E.imu[i]); i ? c.lineTo(x, y) : c.moveTo(x, y); }
+      c.lineTo(X(n / hz), y1 - pad); c.lineTo(X(0), y1 - pad); c.closePath(); c.fillStyle = V('--real-soft'); c.fill();
+      c.beginPath(); for (let i = 0; i < n; i += step) { const x = X(i / hz), y = Y(E.imu[i]); i ? c.lineTo(x, y) : c.moveTo(x, y); }
+      c.strokeStyle = real; c.lineWidth = 2; c.lineJoin = 'round'; c.stroke(); }
+    // gripper chips (cyan = sim)
+    { const [y0, y1] = R.grip, ch = 40, cy = (y0 + y1) / 2 - ch / 2 + 4;
+      E.gripper.forEach(s => { const x0 = X(s.t0), x1 = X(s.t1), closed = s.state === 'closed';
+        c.fillStyle = closed ? sim : V('--sim-soft'); c.fillRect(x0 + 1, cy, x1 - x0 - 2, ch); c.strokeStyle = sim; c.lineWidth = 1.5; c.strokeRect(x0 + 1.5, cy + .5, x1 - x0 - 3, ch - 1);
+        c.fillStyle = closed ? oa : sim; c.font = '600 16px ' + V('--font-ui'); c.textBaseline = 'middle'; c.fillText(s.state, x0 + 10, cy + ch / 2 + 1); }); }
+    // contact chips
+    { const [y0, y1] = R.con, ch = 40, cy = (y0 + y1) / 2 - ch / 2 + 4;
+      E.contacts.forEach(ct => { const x0 = X(ct.t), w = X(1.15) - X(0), col = V(KIND_VAR[ct.kind]), d = t - ct.t, hot = d >= 0 && d < .4;
+        if (hot) { c.save(); c.shadowColor = col; c.shadowBlur = 22 * (1 - d / .4); }
+        c.fillStyle = col; c.fillRect(x0, cy - (hot ? 3 : 0), w, ch + (hot ? 6 : 0)); if (hot) c.restore();
+        c.fillStyle = oa; c.font = '700 14px ' + mono; c.fillText(ct.kind, x0 + 8, cy + ch / 2 + 1);
+        c.fillStyle = col; c.fillRect(x0, y0 + 4, 2, cy - y0 - 4); }); }
+    // playhead
+    const px = X(t); c.strokeStyle = V('--text'); c.lineWidth = 2; c.beginPath(); c.moveTo(px, 22); c.lineTo(px, TH); c.stroke();
+    c.fillStyle = V('--text'); c.beginPath(); c.moveTo(px - 8, 14); c.lineTo(px + 8, 14); c.lineTo(px, 28); c.closePath(); c.fill();
+  }
+
+  // ---------- transport ----------
+  const playBtn = $('ep-b-play');
+  const ICON = { play: '<svg viewBox="0 0 24 24" width="30" height="30" fill="currentColor"><path d="M7 4.5v15l13-7.5z"/></svg>', pause: '<svg viewBox="0 0 24 24" width="30" height="30" fill="currentColor"><path d="M6 4.5h4.5v15H6zM13.5 4.5H18v15h-4.5z"/></svg>' };
+  function setPlaying(p) { playing = p; playBtn.innerHTML = p ? ICON.pause : ICON.play; last = performance.now(); }
+  function seek(x) { t = cl(x, 0, E.duration - 1e-3); syncVideos(); }
+  playBtn.onclick = () => setPlaying(!playing);
+  $('ep-b-start').onclick = () => seek(0); $('ep-b-end').onclick = () => seek(E.duration);
+  $('ep-b-back').onclick = () => seek(t - 1); $('ep-b-fwd').onclick = () => seek(t + 1);
+  $('ep-speed').onchange = e => { speed = +e.target.value; };
+  function drag(el, toT) {
+    let on = false; const mv = e => { if (on) seek(toT(e)); };
+    el.addEventListener('pointerdown', e => { on = true; el.setPointerCapture(e.pointerId); seek(toT(e)); });
+    el.addEventListener('pointermove', mv); el.addEventListener('pointerup', () => on = false); el.addEventListener('pointercancel', () => on = false);
+  }
+  const sc = $('ep-scrub');
+  drag(sc, e => (e.clientX - sc.getBoundingClientRect().left) / sc.getBoundingClientRect().width * E.duration);
+  drag(tc, e => { const r = tc.getBoundingClientRect(), x = e.clientX - r.left; return (x - LBL) / (TW - LBL - PADR) * E.duration; });
+  addEventListener('keydown', e => {
+    if (!root.classList.contains('on') || e.target.closest('input,select,textarea')) return;
+    const st = e.shiftKey ? 1 : 1 / FPS;
+    if (e.code === 'Space') { e.preventDefault(); setPlaying(!playing); }
+    else if (e.key === 'ArrowLeft') { seek(t - st); setPlaying(false); } else if (e.key === 'ArrowRight') { seek(t + st); setPlaying(false); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); select((cur + EPS.length - 1) % EPS.length); } else if (e.key === 'ArrowDown') { e.preventDefault(); select((cur + 1) % EPS.length); }
+  });
+
+  // ---------- main loop ----------
+  let prevT = 0;
+  function frame(now) {
+    requestAnimationFrame(frame);
+    if (!E || !root.offsetParent) { last = now; return; }
+    if (!TW) layout();
+    const dt = (now - last) / 1000; last = now;
+    if (playing) {
+      const master = live('real') ? vids.real : null;
+      if (master && !master.paused) t = master.currentTime; else t += dt * speed;
+      if (t >= E.duration) { t = 0; if (vids.real.currentTime) vids.real.currentTime = 0; if (vids.sim.currentTime) vids.sim.currentTime = 0; }
+      syncVideos();
+    }
+    if (!live('real')) drawScene($('ep-cv-real'), 'real'); if (!live('sim')) drawScene($('ep-cv-sim'), 'sim');
+    drawTracks();
+    const p = t / E.duration;
+    $('ep-sf').style.width = p * 100 + '%'; $('ep-th').style.left = p * 100 + '%';
+    $('ep-tm').textContent = fmtT(t); $('ep-fr').textContent = 'frame ' + Math.floor(t * E.fps) + ' / ' + E.frames;
+    root.querySelectorAll('.cl').forEach((el, i) => { const d = t - E.contacts[i].t; el.classList.toggle('hit', d >= 0 && d < .4); });
+    prevT = t;
+  }
+  if (window.ResizeObserver) new ResizeObserver(layout).observe(tc.parentNode); else addEventListener('resize', layout);
+  M.on('screen', id => { if (id === 'episode') setTimeout(layout, 30); });
+  setPlaying(true);
+  // live: real episodes from GET /files/dataset_stats.json -> episodes:[{n, task, duration}]
+  (async () => {
+    if (!window.MIMESIS_DEMO) try {
+      const st = await (await fetch((M.api || '') + '/files/dataset_stats.json?' + Date.now())).json();
+      if (st.episodes && st.episodes.length) EPS = st.episodes.map(e => ({ n: e.n, task: e.task + ' · ' + e.id, dur: e.duration }));
+    } catch (e) {}
+    buildRail(); select(EPS.length - 1);
+  })();
+  M.on('screen', id => { if (id === 'episode' && !window.MIMESIS_DEMO) fetch((M.api || '') + '/files/dataset_stats.json?' + Date.now()).then(r => r.json()).then(st => {
+    if (st.episodes && st.episodes.length !== EPS.length) { EPS = st.episodes.map(e => ({ n: e.n, task: e.task + ' · ' + e.id, dur: e.duration })); buildRail(); select(EPS.length - 1); } }).catch(() => {}); });
+  requestAnimationFrame(frame);
+})();
+</script>
+
+<section id="scr-multiply" class="screen">
+  <!-- slim icon rail (Frigate) -->
+  <nav class="mx-rail">
+    <svg viewBox="0 0 24 24" class="on"><rect x="3" y="7" width="12" height="10" rx="2"/><path d="M15 11l6-3v8l-6-3z"/></svg>
+    <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+    <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M16 16l5 5"/></svg>
+    <svg viewBox="0 0 24 24"><path d="M4 18V9m6 9V5m6 13v-7m6 7H2"/></svg>
+    <i></i>
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3m0 14v3M2 12h3m14 0h3M5 5l2 2m10 10l2 2M19 5l-2 2M7 17l-2 2"/></svg>
+  </nav>
+
+  <!-- recent landed variants: Frigate "Xm ago" thumb row -->
+  <div class="mx-thumbs" id="mx-thumbs"></div>
+
+  <!-- hero counter + controls -->
+  <div class="mx-band">
+    <div class="mx-count">
+      <div class="mx-cap"><span id="mx-cap-state">GENERATED</span><span class="mx-cap-sub">sim variants from 1 real demo</span></div>
+      <div class="mx-num"><span id="mx-num">10</span><span class="mx-of" id="mx-of">/ 10</span></div>
+    </div>
+    <div class="mx-ctl">
+      <div class="mx-row"><span class="mx-lbl">Variants</span><span class="mx-val" id="mx-val">10</span></div>
+      <input type="range" id="mx-slider" min="10" max="1000" step="10" value="10">
+      <div class="mx-ticks"><span>10</span><span>250</span><span>500</span><span>750</span><span>1,000</span></div>
+      <div class="mx-row mx-gridrow"><span class="mx-lbl">Grid</span>
+        <span class="mx-seg" id="mx-seg"><button class="on" data-n="3">3 x 3</button><button data-n="5">5 x 5</button></span></div>
+    </div>
+    <button class="mx-gen" id="mx-gen"><span class="mx-genfill" id="mx-genfill"></span><span class="mx-gentxt" id="mx-gentxt">Generate</span></button>
+  </div>
+
+  <div class="mx-grid" id="mx-grid"></div>
+
+  <!-- right panel: variation knobs + donut -->
+  <aside class="mx-side">
+    <header>Variation knobs <span class="mx-hint">sampled per variant</span></header>
+    <div class="mx-knobs" id="mx-knobs"></div>
+    <header class="mx-h2">Result <span class="mx-hint" id="mx-landed">0 landed</span></header>
+    <div class="mx-donutwrap">
+      <canvas id="mx-donut" width="260" height="260"></canvas>
+      <div class="mx-pcts">
+        <div class="mx-p ok"><span class="mx-pl">OK</span><span class="mx-pn" id="mx-ok-pct">100.0%</span><span class="mx-pc" id="mx-ok-c">0</span></div>
+        <div class="mx-p slip"><span class="mx-pl">SLIP</span><span class="mx-pn" id="mx-slip-pct">0.0%</span><span class="mx-pc" id="mx-slip-c">0</span></div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Frigate-style bottom status strip -->
+  <footer class="mx-status">
+    <span class="mx-dot" id="mx-sdot"></span>
+    <span id="mx-stxt">Generated 10 / 10</span>
+    <span class="mx-sep">·</span><span id="mx-ms">2 ms physics step</span>
+    <span class="mx-sep">·</span><span>MuJoCo 500 Hz</span>
+    <span class="mx-sep">·</span><span id="mx-sgrid">3 x 3 view</span>
+    <span class="mx-right"><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg>Sim is healthy</span>
+  </footer>
+</section>
+<style>
+#scr-multiply{background:var(--bg);color:var(--text);font-family:var(--font-ui);overflow:hidden}
+#scr-multiply *{box-sizing:border-box}
+#scr-multiply .mx-rail{position:absolute;left:0;top:0;width:56px;height:924px;background:var(--surface);border-right:1px solid var(--line-strong);display:flex;flex-direction:column;align-items:center;gap:var(--sp-3);padding-top:var(--sp-4)}
+#scr-multiply .mx-rail svg{width:38px;height:38px;padding:8px;border-radius:var(--r-lg);fill:none;stroke:var(--text-muted);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+#scr-multiply .mx-rail svg.on{background:var(--sim);stroke:var(--on-accent)}
+#scr-multiply .mx-rail i{flex:1}
+#scr-multiply .mx-rail svg:last-child{margin-bottom:var(--sp-4)}
+
+#scr-multiply .mx-thumbs{position:absolute;left:68px;top:8px;width:1412px;height:72px;display:flex;gap:var(--sp-2)}
+#scr-multiply .mx-th{position:relative;flex:1;border-radius:var(--r-md);overflow:hidden;background:var(--surface);border:1px dashed var(--line-strong)}
+#scr-multiply .mx-th.full{border:2px solid var(--ok)}
+#scr-multiply .mx-th.full.slip{border-color:var(--slip)}
+#scr-multiply .mx-th canvas{width:100%;height:100%;display:block}
+#scr-multiply .mx-th span{position:absolute;left:6px;bottom:3px;font:600 var(--fs-xs)/1 var(--font-mono);color:var(--text);text-shadow:0 0 4px var(--bg),0 0 4px var(--bg)}
+
+#scr-multiply .mx-band{position:absolute;left:68px;top:92px;width:1412px;height:150px;display:flex;align-items:center;gap:var(--sp-5)}
+#scr-multiply .mx-count{width:600px;flex:none}
+#scr-multiply .mx-cap{display:flex;gap:var(--sp-3);align-items:baseline;font:600 var(--fs-sm)/1 var(--font-ui);letter-spacing:var(--tracking-caps);color:var(--sim);margin-bottom:2px}
+#scr-multiply .mx-cap-sub{color:var(--text-muted);letter-spacing:0;font-weight:500}
+#scr-multiply .mx-num{font:700 var(--fs-hero)/1 var(--font-mono);color:var(--text);display:flex;align-items:baseline;gap:var(--sp-3);font-variant-numeric:tabular-nums;letter-spacing:-.02em;white-space:nowrap}
+#scr-multiply .mx-num.queued{color:var(--text-muted)}
+#scr-multiply .mx-num.run{color:var(--sim)}
+#scr-multiply .mx-of{font:500 var(--fs-lg)/1 var(--font-mono);color:var(--text-muted);letter-spacing:0}
+#scr-multiply .mx-ctl{flex:1;min-width:0}
+#scr-multiply .mx-row{display:flex;justify-content:space-between;align-items:baseline}
+#scr-multiply .mx-lbl{font:600 var(--fs-sm)/1 var(--font-ui);letter-spacing:var(--tracking-caps);text-transform:uppercase;color:var(--text-muted)}
+#scr-multiply .mx-val{font:700 var(--fs-lg)/1 var(--font-mono);color:var(--sim)}
+#scr-multiply #mx-slider{-webkit-appearance:none;appearance:none;width:100%;height:36px;background:transparent;margin:6px 0 0;cursor:pointer}
+#scr-multiply #mx-slider::-webkit-slider-runnable-track{height:12px;border-radius:6px;background:linear-gradient(90deg,var(--sim) var(--p,0%),var(--surface-2) var(--p,0%));border:1px solid var(--line-strong)}
+#scr-multiply #mx-slider::-webkit-slider-thumb{-webkit-appearance:none;width:34px;height:34px;border-radius:50%;background:var(--sim);border:4px solid var(--bg);margin-top:-12px;box-shadow:0 0 0 2px var(--sim)}
+#scr-multiply #mx-slider:disabled{opacity:.5;cursor:default}
+#scr-multiply .mx-ticks{display:flex;justify-content:space-between;font:var(--fs-xs)/1 var(--font-mono);color:var(--text-muted);margin-top:2px}
+#scr-multiply .mx-gridrow{margin-top:var(--sp-3);align-items:center;justify-content:flex-start;gap:var(--sp-4)}
+#scr-multiply .mx-seg{display:flex;border:1px solid var(--line-strong);border-radius:var(--r-md);overflow:hidden}
+#scr-multiply .mx-seg button{all:unset;cursor:pointer;padding:6px 18px;font:600 var(--fs-sm)/1 var(--font-mono);color:var(--text-muted);background:var(--surface)}
+#scr-multiply .mx-seg button.on{background:var(--sim-soft);color:var(--sim)}
+#scr-multiply .mx-gen{all:unset;box-sizing:border-box;position:relative;overflow:hidden;cursor:pointer;flex:none;width:260px;height:96px;border-radius:var(--r-lg);background:var(--sim);color:var(--on-accent);text-align:center;transition:transform var(--t-fast) var(--ease),filter var(--t-fast)}
+#scr-multiply .mx-gen:hover{filter:brightness(1.1)}
+#scr-multiply .mx-gen:active{transform:scale(.97)}
+#scr-multiply .mx-gen.busy{cursor:default;background:var(--sim-soft);color:var(--sim);outline:2px solid var(--sim);outline-offset:-2px}
+#scr-multiply .mx-genfill{position:absolute;left:0;top:0;bottom:0;width:0;background:var(--sim);opacity:.35}
+#scr-multiply .mx-gentxt{position:relative;font:700 var(--fs-lg)/96px var(--font-ui);letter-spacing:.02em}
+
+#scr-multiply .mx-grid{position:absolute;left:68px;top:254px;width:1412px;height:662px;display:grid;gap:var(--sp-3)}
+#scr-multiply .mx-tile{position:relative;border-radius:var(--r-lg);border:2px dashed var(--line-strong);background:transparent;overflow:hidden;transition:border-color var(--t-med) var(--ease),background var(--t-med) var(--ease),box-shadow var(--t-med) var(--ease)}
+#scr-multiply .mx-in{position:absolute;inset:0;opacity:0;transform:scale(.88);transition:opacity var(--t-med) var(--ease),transform var(--t-med) var(--ease)}
+#scr-multiply .mx-tile.full{border:2px solid var(--ok);background:var(--surface)}
+#scr-multiply .mx-tile.full.slip{border:3px solid var(--slip)}
+#scr-multiply .mx-tile.full .mx-in{opacity:1;transform:none}
+#scr-multiply .mx-tile.flash{background:var(--slip-soft);box-shadow:0 0 0 6px var(--slip-soft),0 0 36px var(--slip);transition:none}
+#scr-multiply .mx-tile canvas,#scr-multiply .mx-tile video{position:absolute;inset:0;width:100%;height:100%;display:block;object-fit:cover}
+#scr-multiply .mx-tile video{opacity:0}
+#scr-multiply .mx-tile video.on{opacity:1}
+#scr-multiply .mx-lab{position:absolute;left:0;right:0;bottom:0;padding:5px var(--sp-3);background:rgba(11,13,16,.82);font:500 var(--fs-sm)/1.2 var(--font-mono);color:var(--text);white-space:nowrap;overflow:hidden}
+#scr-multiply .mx-grid.g5 .mx-lab{font-size:var(--fs-xs);padding:4px var(--sp-2)}
+#scr-multiply .mx-lab b{color:var(--sim);font-weight:500}
+#scr-multiply .mx-bd{position:absolute;left:var(--sp-2);top:var(--sp-2);padding:4px 10px;border-radius:var(--r-md);background:rgba(11,13,16,.8);font:700 var(--fs-sm)/1 var(--font-mono);color:var(--ok);display:flex;gap:6px;align-items:center}
+#scr-multiply .mx-tile.slip .mx-bd{background:var(--slip);color:var(--on-accent)}
+#scr-multiply .mx-rd{position:absolute;right:var(--sp-3);top:var(--sp-3);width:8px;height:8px;border-radius:50%;background:var(--sim)}
+#scr-multiply .mx-tile.slip .mx-rd{background:var(--slip)}
+#scr-multiply .mx-idx{position:absolute;right:var(--sp-3);top:var(--sp-5);font:var(--fs-xs)/1 var(--font-mono);color:var(--text-muted)}
+
+#scr-multiply .mx-side{position:absolute;left:1492px;top:8px;width:416px;height:908px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);overflow:hidden}
+#scr-multiply .mx-side header{display:flex;justify-content:space-between;align-items:baseline;padding:var(--sp-3) var(--sp-4);background:var(--surface-2);border-bottom:1px solid var(--line);font:600 var(--fs-md)/1 var(--font-ui)}
+#scr-multiply .mx-h2{border-top:1px solid var(--line)}
+#scr-multiply .mx-hint{font:500 var(--fs-xs)/1 var(--font-mono);color:var(--text-muted)}
+#scr-multiply .mx-knob{padding:var(--sp-3) var(--sp-4) 10px;border-bottom:1px solid var(--line);cursor:pointer;transition:opacity var(--t-fast)}
+#scr-multiply .mx-knob.off{opacity:.45}
+#scr-multiply .mx-kt{display:flex;justify-content:space-between;align-items:center}
+#scr-multiply .mx-kn{font:600 var(--fs-sm)/1 var(--font-ui);display:flex;align-items:center;gap:var(--sp-2)}
+#scr-multiply .mx-chip{padding:3px 8px;border-radius:var(--r-sm);background:var(--sim-soft);color:var(--sim);font:600 var(--fs-xs)/1 var(--font-mono)}
+#scr-multiply .mx-knob.off .mx-chip{background:var(--surface-2);color:var(--text-muted)}
+#scr-multiply .mx-kv{font:700 var(--fs-md)/1 var(--font-mono);color:var(--text)}
+#scr-multiply .mx-kb{position:relative;height:8px;border-radius:4px;background:var(--surface-2);margin-top:10px}
+#scr-multiply .mx-kb i{position:absolute;top:0;bottom:0;border-radius:4px;background:var(--sim)}
+#scr-multiply .mx-knob.off .mx-kb i{background:var(--text-dim)}
+#scr-multiply .mx-donutwrap{display:flex;align-items:center;gap:var(--sp-3);padding:var(--sp-3) var(--sp-4)}
+#scr-multiply #mx-donut{width:190px;height:190px;flex:none}
+#scr-multiply .mx-pcts{display:flex;flex-direction:column;gap:var(--sp-4);flex:1}
+#scr-multiply .mx-p{display:flex;flex-direction:column;gap:2px}
+#scr-multiply .mx-pl{font:700 var(--fs-sm)/1 var(--font-ui);letter-spacing:var(--tracking-caps)}
+#scr-multiply .mx-pn{font:700 var(--fs-xl)/1 var(--font-mono);font-variant-numeric:tabular-nums}
+#scr-multiply .mx-pc{font:var(--fs-sm)/1 var(--font-mono);color:var(--text-muted)}
+#scr-multiply .mx-p.ok .mx-pl,#scr-multiply .mx-p.ok .mx-pn{color:var(--ok)}
+#scr-multiply .mx-p.slip .mx-pl,#scr-multiply .mx-p.slip .mx-pn{color:var(--slip)}
+
+#scr-multiply .mx-status{position:absolute;left:0;right:0;top:924px;height:40px;background:var(--surface);border-top:1px solid var(--line-strong);display:flex;align-items:center;gap:var(--sp-3);padding:0 var(--sp-4);font:var(--fs-sm)/1 var(--font-mono);color:var(--text-muted)}
+#scr-multiply .mx-dot{width:10px;height:10px;border-radius:50%;background:var(--ok)}
+#scr-multiply .mx-dot.run{background:var(--sim)}
+#scr-multiply .mx-status #mx-stxt{color:var(--text)}
+#scr-multiply .mx-sep{color:var(--text-dim)}
+#scr-multiply .mx-right{margin-left:auto;display:flex;align-items:center;gap:var(--sp-2);color:var(--text-muted)}
+#scr-multiply .mx-right svg{width:18px;height:18px;fill:none;stroke:var(--ok);stroke-width:3;stroke-linecap:round;stroke-linejoin:round}
+</style>
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const root = $('scr-multiply');
+  const css = getComputedStyle(document.documentElement);
+  const C = {}; ['bg','surface','surface-2','line','line-strong','text','sim','sim-soft','ok','slip','text-muted'].forEach(k => C[k] = css.getPropertyValue('--' + k).trim());
+  const fmt = n => Math.round(n).toLocaleString('en-US');
+  const ease = t => 1 - Math.pow(1 - t, 3);
+  const RATE = 0.22, GEN_MS = 6000, T = 4.2;
+
+  // ---- variants (deterministic) ----
+  const OBJS = ['cube', 'cup', 'ball', 'box', 'can', 'block'];
+  const SHAPE = [0, 1, 2, 0, 1, 0];
+  const SLIP_POS = [2, 6, 11, 17, 22, 13, 4]; // visible-grid slips: 2/9 = 22%, 5/25 = 20%
+  function rnd(i, k) { let x = Math.sin(i * 127.1 + k * 311.7) * 43758.5453; return x - Math.floor(x); }
+  let seedBase = 0;
+  function variant(i, pos) {
+    const s = i + seedBase * 977;
+    const slip = pos != null ? SLIP_POS.slice(0, 5).includes(pos) : rnd(s, 9) < RATE;
+    const mass = slip ? 700 + rnd(s, 1) * 800 : 200 + rnd(s, 1) * 700;
+    const mu = slip ? 0.15 + rnd(s, 2) * 0.2 : 0.42 + rnd(s, 2) * 0.48;
+    const o = Math.floor(rnd(s, 3) * OBJS.length);
+    return { n: i, slip, mass: Math.round(mass / 10) * 10, mu: mu.toFixed(2), obj: OBJS[o], shape: SHAPE[o],
+      size: rnd(s, 4), px: (rnd(s, 5) - .5) * .24, phase: rnd(s, 6) * T };
+  }
+
+  // ---- canvas drawing of one sim variant at loop time u ----
+  const ez = t => t < 0 ? 0 : t > 1 ? 1 : t * t * (3 - 2 * t);
+  function draw(g, w, h, v, u) {
+    g.fillStyle = C.surface; g.fillRect(0, 0, w, h);
+    const fy = h * .8, os = h * (.17 + .11 * v.size), fl = os * 1.15, hold = fl * .35;
+    g.lineWidth = Math.max(1.5, h / 90); g.lineJoin = 'round';
+    // floor + faint grid
+    g.strokeStyle = C['line-strong']; g.beginPath(); g.moveTo(0, fy); g.lineTo(w, fy); g.stroke();
+    g.strokeStyle = C.line; g.lineWidth = 1; g.beginPath();
+    for (let k = -6; k <= 6; k++) { g.moveTo(w / 2 + k * w * .09, fy); g.lineTo(w / 2 + k * w * .22, h); } g.stroke();
+    g.lineWidth = Math.max(1.5, h / 90);
+    const ox = w * (.5 + v.px), restY = fy - os - hold;      // palm y when object rests
+    const shift = w * .09;
+    // palm
+    let py, px = ox, gap = os * 1.9;
+    if (u < .9) { py = h * .1 + (restY - h * .1) * ez(u / .9); }
+    else if (u < 1.2) { py = restY; gap = os * (1.9 - .9 * ez((u - .9) / .3)); }
+    else if (u < 2.6) { const e = ez((u - 1.2) / 1.4); py = restY - (restY - h * .22) * e; px = ox + shift * e; gap = os * 1.0; }
+    else if (u < 3.3) { const e = ez((u - 2.6) / .7); py = h * .22 + (restY - h * .22) * e; px = ox + shift; gap = os * 1.0; }
+    else if (u < 3.6) { py = restY; px = ox + shift; gap = os * (1.0 + .9 * ez((u - 3.3) / .3)); }
+    else { py = restY - (restY - h * .1) * ez((u - 3.6) / .6); px = ox + shift; gap = os * 1.9; }
+    if (v.slip && u > 1.2) gap = os * 1.0 + (u > 3 ? os * .9 * ez((u - 3) / .4) : 0);
+    // object
+    let cx = ox, top = fy - os, rot = 0, alpha = 1, slipped = false;
+    const ud = 1.75;
+    if (v.slip) {
+      if (u < ud) { if (u >= 1.2) { cx = px; top = py + hold; } }
+      else {
+        slipped = true;
+        const e = ez((ud - 1.2) / 1.4), pyd = restY - (restY - h * .22) * e, y0 = pyd + hold, x0 = ox + shift * e, t = u - ud;
+        const fall = Math.min(1, t / .45);
+        top = y0 + (fy - os - y0) * fall * fall;
+        cx = x0 + (t > .45 ? w * .17 * (1 - Math.exp(-(t - .45) * 2.6)) : t * w * .03);
+        rot = Math.min(1, t / .6) * 1.0; alpha = Math.min(1, (T - u) / .3);
+      }
+    } else if (u >= 1.2 && u < 3.3) { cx = px; top = py + hold; }
+    else if (u >= 3.3) { cx = ox + shift; top = fy - os; }
+    g.save(); g.globalAlpha = Math.max(0, alpha); g.translate(cx, top + os / 2); g.rotate(rot);
+    g.strokeStyle = slipped ? C.slip : C.sim; g.fillStyle = slipped ? 'rgba(255,77,94,.16)' : C['sim-soft'];
+    const r = os / 2;
+    if (v.shape === 2) { g.beginPath(); g.arc(0, 0, r, 0, 7); g.fill(); g.stroke(); g.beginPath(); g.ellipse(0, 0, r, r * .35, 0, 0, 7); g.stroke(); }
+    else if (v.shape === 1) { g.fillRect(-r * .8, -r, r * 1.6, os); g.strokeRect(-r * .8, -r, r * 1.6, os); g.beginPath(); g.ellipse(0, -r, r * .8, r * .28, 0, 0, 7); g.stroke(); g.beginPath(); g.ellipse(0, r, r * .8, r * .28, 0, 0, Math.PI); g.stroke(); }
+    else { g.fillRect(-r, -r, os, os); g.strokeRect(-r, -r, os, os); g.beginPath(); g.moveTo(-r, -r); g.lineTo(r, r); g.moveTo(r, -r); g.lineTo(-r, r); g.globalAlpha *= .35; g.stroke(); }
+    g.restore();
+    // gripper (cyan wireframe)
+    g.strokeStyle = C.sim; g.fillStyle = C['sim-soft'];
+    const pw = gap + os * .5;
+    g.beginPath(); g.moveTo(px, 0); g.lineTo(px, py - os * .35); g.stroke();
+    g.fillRect(px - pw / 2, py - os * .35, pw, os * .35); g.strokeRect(px - pw / 2, py - os * .35, pw, os * .35);
+    const fw = os * .26;
+    g.strokeRect(px - gap / 2 - fw, py, fw, fl); g.strokeRect(px + gap / 2, py, fw, fl);
+  }
+
+  // ---- state ----
+  let N = 10, n = 3, tiles = [], counter = 10, state = 'done', genCount = 10, t0 = 0;
+  const grid = $('mx-grid'), slider = $('mx-slider'), numEl = $('mx-num');
+  let cAnim = null;
+  let videoOK = false, labels = null, labelsVer = Date.now();
+  // WIRE: GET /files/variants/labels.json -> [{n,object,mass_g,mu,slip}], videos GET /files/variants/<n>.mp4
+  if (window.MIMESIS_DEMO === false || true) fetch((window.M && M.api || '') + '/files/variants/labels.json').then(r => r.ok ? r.json() : null).then(j => { if (Array.isArray(j) && j.length) { labels = j; videoOK = true; if (!window.MIMESIS_DEMO) tiles.forEach((t, k) => land(t, k, true)); } }).catch(() => {});
+
+  function buildGrid(keepFull) {
+    grid.innerHTML = ''; grid.className = 'mx-grid g' + n;
+    grid.style.gridTemplateColumns = `repeat(${n},1fr)`; grid.style.gridTemplateRows = `repeat(${n},1fr)`;
+    tiles = [];
+    for (let j = 0; j < n * n; j++) {
+      const el = document.createElement('div'); el.className = 'mx-tile';
+      el.innerHTML = '<div class="mx-in"><canvas width="440" height="200"></canvas><video muted loop playsinline preload="none"></video><div class="mx-bd"></div><span class="mx-rd"></span><span class="mx-idx"></span><div class="mx-lab"></div></div>';
+      grid.appendChild(el);
+      tiles.push({ el, cv: el.querySelector('canvas'), g: el.querySelector('canvas').getContext('2d'), vid: el.querySelector('video'), v: null, full: false,
+        tLand: 350 + (j / (n * n)) * (GEN_MS * .72) + rnd(j, 8) * 160 });
+      if (keepFull) land(tiles[j], j, true);
+    }
+  }
+  function land(t, j, instant) {
+    const v = variant(j, j); t.v = v; t.full = true;
+    const L = labels && labels[j]; const mass = L && L.mass_g || v.mass, mu = L && L.mu != null ? L.mu : v.mu, ob = L && L.object || v.obj, sl = L && L.slip != null ? L.slip : v.slip;
+    v.slip = !!sl; t.v.slip = v.slip;
+    t.el.classList.toggle('slip', v.slip);
+    t.el.querySelector('.mx-bd').innerHTML = v.slip ? 'SLIP!' : 'OK';
+    t.el.querySelector('.mx-idx').textContent = '#' + String(j).padStart(4, '0');
+    t.el.querySelector('.mx-lab').innerHTML = `<b>${ob}</b> · ${mass} g · μ ${mu}`;
+    if (videoOK && L) { t.vid.preload = 'auto'; t.vid.src = (window.M && M.api || '') + `/files/variants/${j}.mp4?v=${labelsVer}`; t.vid.load(); t.vid.onloadeddata = () => { t.vid.classList.add('on'); t.vid.play().catch(() => {}); }; }
+    t.el.classList.add('full');
+    if (v.slip && !instant) { t.el.classList.add('flash'); setTimeout(() => t.el.classList.remove('flash'), 420); }
+  }
+
+  // ---- knobs ----
+  const KN = [['Mass', '0.12–0.85 kg', .1, .75], ['Friction μ', '0.10–1.05', .08, .95], ['Object size', '0.82–1.18×', .3, .7], ['Position', '±1.5 cm', .4, .6], ['Time-warp', '0.88×–1.15×', .4, .6], ['Sensor noise', 'bias + white', 0, .4]];
+  $('mx-knobs').innerHTML = KN.map(k => `<div class="mx-knob"><div class="mx-kt"><span class="mx-kn">${k[0]}<span class="mx-chip">ON</span></span><span class="mx-kv">${k[1]}</span></div><div class="mx-kb"><i style="left:${k[2] * 100}%;width:${(k[3] - k[2]) * 100}%"></i></div></div>`).join('');
+  $('mx-knobs').addEventListener('click', e => { const k = e.target.closest('.mx-knob'); if (!k) return; k.classList.toggle('off'); k.querySelector('.mx-chip').textContent = k.classList.contains('off') ? 'OFF' : 'ON'; });
+
+  // ---- thumbs ----
+  const thumbs = [];
+  for (let i = 0; i < 10; i++) { const d = document.createElement('div'); d.className = 'mx-th'; d.innerHTML = '<canvas width="170" height="68"></canvas><span></span>'; $('mx-thumbs').appendChild(d); thumbs.push({ el: d, g: d.querySelector('canvas').getContext('2d'), sp: d.querySelector('span'), v: null }); }
+  function pushThumb(idx) {
+    if (thumbs[0].v && thumbs[0].v.n === idx) return; const v = variant(idx, null); if (labels && labels[idx]) v.slip = !!labels[idx].slip; const arr = thumbs.map(t => t.v); arr.unshift(v); arr.length = 10;
+    thumbs.forEach((t, i) => { const q = arr[i]; t.v = q; if (!q) return; t.el.classList.add('full'); t.el.classList.toggle('slip', q.slip); t.sp.textContent = (q.slip ? 'SLIP ' : '') + '#' + q.n; draw(t.g, 170, 68, q, q.slip ? 2.9 : 2.3); });
+  }
+  for (let i = 9; i >= 0; i--) pushThumb(i);
+
+  // ---- donut + numbers ----
+  const dn = $('mx-donut'), dg = dn.getContext('2d');
+  function slipCount(c) {
+    if (c <= 0) return 0;
+    const lj = liveJob || lastLive;
+    if (lj && lj.progress && lj.progress.done) return Math.min(c, Math.round(c * lj.progress.slip / lj.progress.done));
+    const prog = c / N, jit = 4 * Math.sin(c / 11) * (1 - Math.min(1, prog) * 1);
+    return Math.max(0, Math.min(c, Math.round(c * RATE + (state === 'run' ? jit : 0))));
+  }
+  function drawDonut(c) {
+    const s = slipCount(c), ok = c - s, tot = Math.max(1, c), W = 260, R = 108, lw = 34;
+    dg.clearRect(0, 0, W, W); dg.lineWidth = lw; dg.lineCap = 'butt';
+    dg.strokeStyle = C['surface-2']; dg.beginPath(); dg.arc(130, 130, R, 0, 7); dg.stroke();
+    if (c > 0) {
+      const a0 = -Math.PI / 2, a1 = a0 + ok / tot * Math.PI * 2;
+      dg.strokeStyle = C.ok; dg.beginPath(); dg.arc(130, 130, R, a0, a1); dg.stroke();
+      dg.strokeStyle = C.slip; dg.beginPath(); dg.arc(130, 130, R, a1, a0 + Math.PI * 2); dg.stroke();
+    }
+    dg.fillStyle = C.text; dg.textAlign = 'center'; dg.textBaseline = 'middle'; dg.font = '700 40px ' + css.getPropertyValue('--font-mono');
+    dg.fillText(fmt(c), 130, 124); dg.fillStyle = C['text-muted']; dg.font = '500 16px ' + css.getPropertyValue('--font-mono'); dg.fillText('variants', 130, 156);
+    $('mx-ok-pct').textContent = (c ? ok / tot * 100 : 0).toFixed(1) + '%'; $('mx-slip-pct').textContent = (c ? s / tot * 100 : 0).toFixed(1) + '%';
+    $('mx-ok-c').textContent = fmt(ok); $('mx-slip-c').textContent = fmt(s); $('mx-landed').textContent = fmt(c) + ' landed';
+  }
+
+  // ---- counter ----
+  function setNum(v) { counter = v; numEl.textContent = fmt(v); }
+  function animateTo(to, dur) {
+    const from = counter, st = performance.now(); cAnim = { from, to, dur, st };
+  }
+  function status() {
+    $('mx-stxt').textContent = `Generated ${fmt(state === 'run' || state === 'done' ? (state === 'run' ? counter : genCount) : genCount)} / ${fmt(N)}`;
+    $('mx-sgrid').textContent = n + ' x ' + n + ' view';
+  }
+  function setState(s) {
+    state = s;
+    const cap = { run: 'GENERATING', done: 'GENERATED', queued: 'QUEUED · press Generate' }[s]; $('mx-cap-state').textContent = cap;
+    numEl.className = 'mx-num ' + (s === 'run' ? 'run' : s === 'queued' ? 'queued' : '');
+    $('mx-sdot').className = 'mx-dot' + (s === 'run' ? ' run' : '');
+    $('mx-of').textContent = '/ ' + fmt(N);
+    const busy = s === 'run'; $('mx-gen').classList.toggle('busy', busy); $('mx-gentxt').textContent = busy ? 'Generating…' : 'Generate'; slider.disabled = busy;
+  }
+  function paintSlider() { slider.style.setProperty('--p', ((N - 10) / 990 * 100) + '%'); $('mx-val').textContent = fmt(N); }
+
+  slider.addEventListener('input', () => {
+    if (state === 'run') return;
+    N = +slider.value; paintSlider(); setState('queued'); animateTo(N, 500); status();
+  });
+  function generate() {
+    if (state === 'run') return;
+    seedBase++; N = +slider.value; setState('run'); t0 = performance.now(); cAnim = null; setNum(0); genCount = 0; thumbs.forEach(t => { t.v = null; t.el.classList.remove('full', 'slip'); t.sp.textContent = ''; t.g.clearRect(0, 0, 170, 68); });
+    tiles.forEach(t => { t.full = false; t.v = null; t.el.classList.remove('full', 'slip', 'flash'); t.vid.classList.remove('on'); });
+    lastThumb = 0; drawDonut(0); status();
+    if (!window.MIMESIS_DEMO) { lastLive = null; liveJob = { state: 'running', progress: { done: 0, total: N, ok: 0, slip: 0 } }; liveStart = performance.now();
+      fetch(`/multiply?n=${N}&render=9`, { method: 'POST' }).then(r => r.json()).then(j => { if (j.state === 'error') liveJob = null; }).catch(() => { liveJob = null; }); }
+  }
+  // live: progress of the backend multiply job (sim/augment.py in a subprocess) arrives over /ws
+  let liveJob = null, liveStart = 0;
+  M.on('jobs', js => { if (liveJob && js.multiply && performance.now() - liveStart > 1500) liveJob = js.multiply; });
+  function reloadLabels() {
+    return fetch((M.api || '') + '/files/variants/labels.json?' + Date.now()).then(r => r.ok ? r.json() : null).then(j => { if (Array.isArray(j) && j.length) { labels = j; videoOK = true; labelsVer = Date.now(); } }).catch(() => {});
+  }
+  $('mx-gen').addEventListener('click', generate);
+  addEventListener('keydown', e => { if (e.target.closest('input,select,textarea,button')) return; if (e.key === 'g' || e.key === 'Enter') { if (root.classList.contains('on')) generate(); } });
+  $('mx-seg').addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return; n = +b.dataset.n;
+    document.querySelectorAll('#mx-seg button').forEach(x => x.classList.toggle('on', x === b));
+    buildGrid(state === 'done' || state === 'queued'); status();
+  });
+
+  // ---- main loop ----
+  let lastThumb = 0, lastMs = 0, lastLive = null;
+  function tick(now) {
+    requestAnimationFrame(tick);
+    if (!root.classList.contains('on')) return;
+    if (state === 'run') {
+      let el = now - t0, p = Math.min(1, el / GEN_MS);
+      if (liveJob) {
+        const pr = liveJob.progress || { done: 0, total: N };
+        p = liveJob.state === 'done' ? 1 : Math.min(.995, pr.done / Math.max(1, pr.total));
+        el = p * GEN_MS;
+        if (liveJob.state === 'error') { liveJob = null; p = 1; }
+        else if (p >= 1) { const lj = liveJob; liveJob = null; reloadLabels().then(() => { tiles.forEach((t, j) => land(t, j, true)); }); lastLive = lj; }
+        setNum(Math.round(N * p));
+      } else
+      setNum(Math.round(N * (1 - Math.pow(1 - p, 3))));
+      $('mx-genfill').style.width = (p * 100) + '%';
+      tiles.forEach((t, j) => { if (!t.full && el >= t.tLand) land(t, j, el - t.tLand > 400); });
+      if (now - lastThumb > 140 && counter > 0) { lastThumb = now; pushThumb(Math.max(0, Math.round(counter) - 1)); }
+      drawDonut(counter); genCount = counter; status();
+      if (now - lastMs > 180) { lastMs = now; $('mx-ms').textContent = window.MIMESIS_DEMO ? (2.9 + Math.random() * .5).toFixed(1) + ' ms/step' : (counter / Math.max(.1, (now - t0) / 1000)).toFixed(1) + ' variants/s'; }
+      if (p >= 1) { setNum(N); genCount = N; setState('done'); $('mx-genfill').style.width = '0'; drawDonut(N); status(); if (window.MIMESIS_DEMO) $('mx-ms').textContent = '2 ms physics step'; }
+    } else if (cAnim) {
+      const p = Math.min(1, (now - cAnim.st) / cAnim.dur); setNum(Math.round(cAnim.from + (cAnim.to - cAnim.from) * ease(p))); if (p >= 1) cAnim = null;
+    }
+    tiles.forEach(t => { if (t.full && !t.vid.classList.contains('on')) draw(t.g, 440, 200, t.v, (now / 1000 + t.v.phase) % T); });
+  }
+  buildGrid(true); paintSlider(); setState('done'); drawDonut(N); status();
+  // live: show the last real run (dataset_stats.json) instead of the demo 10
+  if (!window.MIMESIS_DEMO) fetch((M.api || '') + '/files/dataset_stats.json?' + Date.now()).then(r => r.json()).then(st => {
+    if (!st.episodes_sim) return; thumbs.forEach(t => t.v = null); for (let i = 9; i >= 0; i--) pushThumb(i);
+    N = genCount = st.episodes_sim; lastLive = { state: 'done', progress: { done: N, total: N, ok: st.sim_ok, slip: st.sim_slip } };
+    slider.value = Math.min(1000, N); paintSlider(); setNum(N); setState('done'); drawDonut(N); status();
+  }).catch(() => {});
+  requestAnimationFrame(tick);
+})();
+</script>
+
+<section id="scr-ship" class="screen">
+  <!-- header (HF dataset header: title + pill rows + tab row) -->
+  <div class="hd">
+    <div class="title"><span class="ds">Datasets:</span> <span class="org">mimesis/</span><span class="nm mono">pick-up-cup</span>
+      </div>
+    <div class="pills">
+      <span class="lb">Tasks:</span><span class="pill"><i class="ic" style="--c:var(--real)"></i>Robotics</span>
+      <span class="lb">Modalities:</span>
+      <span class="pill"><i class="ic" style="--c:var(--real)"></i>Video</span>
+      <span class="pill"><i class="ic" style="--c:var(--ev-tap)"></i>IMU</span>
+      <span class="pill"><i class="ic" style="--c:var(--real)"></i>Hand joints</span>
+      <span class="pill"><i class="ic" style="--c:var(--sim)"></i>Contact forces</span>
+      <span class="pill"><i class="ic" style="--c:var(--ok)"></i>Labels</span>
+      <span class="lb">Format:</span><span class="pill">LeRobot v3</span>
+      <span class="lb">Size:</span><span class="pill mono" id="sh-sizepill">1K - 10K</span>
+    </div>
+    <div class="tabs"><span class="on">Dataset card</span><span>Data Studio</span><span>Files and versions</span><span>Community</span></div>
+  </div>
+
+  <div class="main">
+    <!-- hero metric: biggest thing on screen, reveals last -->
+    <div class="card hero" id="sh-hero">
+      <div class="ch"><b>Proof</b><span class="tag"><i class="sw sim"></i><span id="sh-herolabel">Trained on simulation only</span></span><span class="dot">·</span><span class="tag"><i class="sw real"></i>tested on real wrist data</span><span class="wire mono">/files/metrics.json</span></div>
+      <div class="hbody">
+        <div class="hm"><div class="big mono sim" id="sh-acc">--%</div><div class="cap">Contact accuracy</div></div>
+        <div class="hm"><div class="big mono sim" id="sh-auc">AUC --</div><div class="cap">Area under ROC, GRAB / TAP / SLIP / SET-DOWN</div></div>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="card chart">
+        <div class="ch"><b>Sim-trained vs baselines</b><span class="sub">accuracy on held-out real wrist data</span></div>
+        <svg id="sh-bars" viewBox="0 0 700 330" preserveAspectRatio="xMidYMid meet"></svg>
+      </div>
+      <div class="card drift">
+        <div class="ch"><b>Why not just use the IMU?</b></div>
+        <svg id="sh-drift" viewBox="0 0 440 262" preserveAspectRatio="xMidYMid meet">
+          <g class="grid"></g>
+          <path id="sh-dcam" pathLength="1" class="cam" d="" />
+          <path id="sh-dimu" pathLength="1" class="imu" d="" />
+          <g id="sh-dend" style="opacity:0"><line id="sh-derrl" class="errl" x1="0" y1="0" x2="0" y2="0"/><circle id="sh-dc1" r="6" class="c1"/><circle id="sh-dc2" r="6" class="c2"/><text id="sh-derr" class="errt mono"></text></g>
+          <g class="leg"><line x1="14" y1="236" x2="40" y2="236" class="cam"/><text x="48" y="241">Camera, true path</text><line x1="220" y1="236" x2="246" y2="236" class="imu"/><text x="254" y="241">IMU, double-integrated</text></g>
+        </svg>
+        <div class="cap2">Double integration turns IMU noise into <b class="mono" id="sh-derrbig">0.0 m</b> of drift in 10 s.</div>
+      </div>
+    </div>
+  </div>
+
+  <aside class="side">
+    <div class="btns">
+      <button class="b primary" id="sh-export">Export to LeRobot</button>
+      <button class="b outline" id="sh-push">Push to Hugging Face</button>
+      <button class="b ghost" id="sh-open">Open folder</button>
+    </div>
+    <div class="msg" id="sh-msg" aria-live="polite">&nbsp;</div>
+    <div class="sec"><div class="stl">Dataset card</div>
+      <div class="stat"><span>Episodes, real</span><b class="mono real" id="sh-er">0</b></div>
+      <div class="stat"><span>Episodes, simulated</span><b class="mono sim" id="sh-es">0</b></div>
+      <div class="stat"><span>Frames</span><b class="mono" id="sh-fr">0</b></div>
+      <div class="stat"><span>Hours of data</span><b class="mono" id="sh-hr">0.0</b></div>
+      <div class="stat"><span>Total size</span><b class="mono" id="sh-sz">0 MB</b></div>
+      <div class="stat"><span>Format</span><b class="mono">LeRobot v3</b></div>
+    </div>
+    <div class="sec mini">
+      <div class="mc"><span>Homepage</span><b>mimesis.ai</b></div>
+      <div class="mc"><span>Robot</span><b>Parallel gripper</b></div>
+      <div class="mc"><span>License</span><b>cc-by-4.0</b></div>
+      <div class="mc"><span>Sim engine</span><b>MuJoCo</b></div>
+      <div class="mc"><span>Sample rate</span><b class="mono">100 Hz IMU</b></div>
+      <div class="mc"><span>Camera</span><b class="mono">30 fps</b></div>
+    </div>
+    <div class="sec"><div class="stl">Trainable with</div>
+      <div class="mod"><b class="mono">lerobot/act</b><span>Robotics</span></div>
+      <div class="mod"><b class="mono">lerobot/smolvla</b><span>Robotics</span></div>
+    </div>
+  </aside>
+</section>
+
+<style>
+#scr-ship{background:var(--bg);color:var(--text);font-family:var(--font-ui);font-size:var(--fs-md)}
+#scr-ship .mono{font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+#scr-ship .sim{color:var(--sim)} #scr-ship .real{color:var(--real)}
+#scr-ship .hd{position:absolute;left:0;top:0;width:1920px;height:178px;background:var(--surface);border-bottom:1px solid var(--line);padding:20px 56px 0}
+#scr-ship .title{display:flex;align-items:center;gap:var(--sp-3);font-size:var(--fs-lg);font-weight:600;height:40px}
+#scr-ship .title .ds{color:var(--text-muted)} #scr-ship .title .org{color:var(--text-muted);font-weight:400;margin-left:-6px}
+#scr-ship .title .nm{font-weight:600;font-size:var(--fs-lg)}
+#scr-ship .chip{margin-left:var(--sp-3);font-size:var(--fs-sm);font-weight:400;color:var(--text-muted);border:1px solid var(--line-strong);border-radius:var(--r-md);padding:4px 12px}
+#scr-ship .chip b{color:var(--text);font-weight:500;margin-left:6px}
+#scr-ship .chip.like{margin-left:20px}
+#scr-ship .pills{display:flex;align-items:center;gap:var(--sp-2);margin-top:var(--sp-4);height:36px;white-space:nowrap}
+#scr-ship .lb{color:var(--text-muted);font-size:var(--fs-sm);margin:0 2px 0 var(--sp-3)}
+#scr-ship .lb:first-child{margin-left:0}
+#scr-ship .pill{display:inline-flex;align-items:center;gap:8px;height:34px;padding:0 12px;border:1px solid var(--line-strong);border-radius:var(--r-md);background:var(--surface-2);font-size:var(--fs-sm)}
+#scr-ship .ic{width:12px;height:12px;border-radius:3px;background:var(--c)}
+#scr-ship .tabs{position:absolute;left:56px;bottom:0;display:flex;gap:var(--sp-6);font-size:var(--fs-md);color:var(--text-muted)}
+#scr-ship .tabs span{padding:0 4px 12px;border-bottom:2px solid transparent}
+#scr-ship .tabs .on{color:var(--text);font-weight:600;border-color:var(--text)}
+
+#scr-ship .main{position:absolute;left:56px;top:196px;width:1180px;height:752px;display:flex;flex-direction:column;gap:var(--sp-4)}
+#scr-ship .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-md)}
+#scr-ship .ch{display:flex;align-items:center;gap:var(--sp-3);height:48px;padding:0 var(--sp-4);border-bottom:1px solid var(--line);background:var(--surface-2);border-radius:var(--r-md) var(--r-md) 0 0;font-size:var(--fs-md)}
+#scr-ship .ch b{font-weight:600} #scr-ship .sub{color:var(--text-muted);font-size:var(--fs-sm)}
+#scr-ship .ch .wire{margin-left:auto;font-size:var(--fs-xs);color:var(--text-muted)}
+#scr-ship .tag{display:inline-flex;align-items:center;gap:8px;font-size:var(--fs-md);color:var(--text)}
+#scr-ship .sw{width:12px;height:12px;border-radius:50%} #scr-ship .sw.sim{background:var(--sim)} #scr-ship .sw.real{background:var(--real)}
+#scr-ship .dot{color:var(--text-muted)}
+#scr-ship .hero{height:300px;border-color:var(--sim);box-shadow:0 0 0 1px var(--sim-soft),0 0 60px var(--sim-soft)}
+#scr-ship .hbody{display:flex;height:252px;align-items:center;padding:0 var(--sp-6);gap:var(--sp-6)}
+#scr-ship .hm{flex:1}
+#scr-ship .big{font-size:var(--fs-hero);font-weight:700;line-height:1;letter-spacing:-.02em;white-space:nowrap}
+#scr-ship .hm:last-child .big{font-size:var(--fs-hero)}
+#scr-ship .cap{margin-top:var(--sp-3);color:var(--text-muted);font-size:var(--fs-md)}
+#scr-ship .hero.pop .big{animation:sh-pop 600ms var(--ease)}
+@keyframes sh-pop{0%{transform:scale(.94);filter:brightness(1.8)}100%{transform:none;filter:none}}
+#scr-ship .hero:not(.shown) .big{opacity:.35}
+#scr-ship .row{display:flex;gap:var(--sp-4);flex:1;min-height:0}
+#scr-ship .chart{width:700px;display:flex;flex-direction:column}
+#scr-ship .drift{width:464px;display:flex;flex-direction:column}
+#scr-ship .chart svg,#scr-ship .drift svg{flex:1;min-height:0;width:100%;padding:var(--sp-3)}
+#scr-ship svg text{font-family:var(--font-ui);fill:var(--text-muted);font-size:14px}
+#scr-ship .bv{font-family:var(--font-mono);font-size:28px;font-weight:700;fill:var(--text)}
+#scr-ship .bl{fill:var(--text);font-size:16px}
+#scr-ship .ax{stroke:var(--line-strong);stroke-width:1} #scr-ship .gl{stroke:var(--line);stroke-width:1}
+#scr-ship .grid line{stroke:var(--line);stroke-width:1}
+#scr-ship path.cam,#scr-ship line.cam{stroke:var(--real);stroke-width:4;fill:none;stroke-linecap:round}
+#scr-ship path.imu,#scr-ship line.imu{stroke:var(--text-muted);stroke-width:3;fill:none;stroke-dasharray:9 7;stroke-linecap:round}
+#scr-ship path.cam,#scr-ship path.imu{stroke-dasharray:none}
+#scr-ship path.imu{stroke-dasharray:none}
+#scr-ship .errl{stroke:var(--slip);stroke-width:2;stroke-dasharray:4 4}
+#scr-ship .c1{fill:var(--real)} #scr-ship .c2{fill:var(--text-muted)}
+#scr-ship .errt{fill:var(--slip);font-size:28px;font-weight:700}
+#scr-ship .leg text{font-size:14px;fill:var(--text)}
+#scr-ship .cap2{padding:0 var(--sp-4) var(--sp-4);font-size:var(--fs-sm);color:var(--text-muted)}
+#scr-ship .cap2 b{color:var(--slip);font-weight:700}
+
+#scr-ship .side{position:absolute;left:1292px;top:196px;width:572px;height:752px;display:flex;flex-direction:column;gap:var(--sp-4)}
+#scr-ship .btns{display:flex;gap:var(--sp-2)}
+#scr-ship .b{white-space:nowrap;height:52px;border-radius:var(--r-md);font:600 var(--fs-sm) var(--font-ui);cursor:pointer;padding:0 var(--sp-2);transition:filter var(--t-fast),background var(--t-fast)}
+#scr-ship .b.primary{flex:1.1;background:var(--sim);color:var(--on-accent);border:1px solid var(--sim)}
+#scr-ship .b.outline{flex:1.4;background:var(--surface-2);color:var(--text);border:1px solid var(--line-strong)}
+#scr-ship .b.ghost{flex:.9;background:transparent;color:var(--text-muted);border:1px solid transparent}
+#scr-ship .b:hover{filter:brightness(1.15)} #scr-ship .b.ghost:hover{background:var(--surface-2);color:var(--text)}
+#scr-ship .msg{min-height:20px;margin:-6px 0 -4px;font-size:var(--fs-sm);color:var(--ok)}
+#scr-ship .sec{border-top:1px solid var(--line);padding-top:var(--sp-4)}
+#scr-ship .stl{font-size:var(--fs-sm);color:var(--text-muted);text-transform:uppercase;letter-spacing:var(--tracking-caps);margin-bottom:var(--sp-2)}
+#scr-ship .stat{display:flex;justify-content:space-between;align-items:baseline;height:44px;border-bottom:1px solid var(--line);font-size:var(--fs-md);color:var(--text-muted)}
+#scr-ship .stat b{font-size:var(--fs-lg);font-weight:600;color:var(--text)}
+#scr-ship .stat b.real{color:var(--real)} #scr-ship .stat b.sim{color:var(--sim)}
+#scr-ship .mini{display:grid;grid-template-columns:1fr 1fr 1fr;gap:var(--sp-2)}
+#scr-ship .mc{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-md);padding:10px 12px;font-size:var(--fs-xs);color:var(--text-muted)}
+#scr-ship .mc b{display:block;margin-top:4px;font-size:var(--fs-sm);font-weight:500;color:var(--text);white-space:nowrap}
+#scr-ship .mod{display:flex;justify-content:space-between;align-items:center;height:48px;margin-bottom:var(--sp-2);padding:0 var(--sp-3);background:var(--surface);border:1px solid var(--line);border-radius:var(--r-md);font-size:var(--fs-sm)}
+#scr-ship .mod span{color:var(--text-muted);font-size:var(--fs-xs)}
+</style>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id), css = n => getComputedStyle($('scr-ship')).getPropertyValue(n).trim();
+  const NS = 'http://www.w3.org/2000/svg';
+  // WIRE: GET /files/metrics.json -> {acc, auc, bars:{baseline,real,sim,simreal}, drift_m}
+  // WIRE: GET /files/dataset_stats.json -> {episodes_real, episodes_sim, frames, hours, size_mb}
+  // placeholder values until backend exists:
+  let metrics = { acc: 87, auc: 0.93, bars: { baseline: 58, real: 74, sim: 87, simreal: 93 }, drift_m: 3.8 };
+  let stats = { episodes_real: 12, episodes_sim: 1200, frames: 1456000, hours: 13.5, size_mb: 2840 };
+  const fmt = {
+    int: v => Math.round(v).toLocaleString('en-US'),
+    d1: v => v.toFixed(1), d2: v => v.toFixed(2),
+    mb: v => Math.round(v).toLocaleString('en-US') + ' MB'
+  };
+  const ease = t => 1 - Math.pow(1 - t, 3);
+  let token = 0;
+  function count(el, to, dur, f, token0, pre = '', post = '') {
+    const t0 = performance.now();
+    (function step(n) {
+      if (token0 !== token) return;
+      const p = Math.min(1, (n - t0) / dur);
+      el.textContent = pre + f(to * ease(p)) + post;
+      if (p < 1) requestAnimationFrame(step);
+    })(t0);
+  }
+
+  // ---- bar chart ----
+  const bars = [
+    { k: 'baseline', l: 'Baseline', s: 'chance', c: '--text-dim' },
+    { k: 'real', l: 'Real-only', s: 'trained on real', c: '--real' },
+    { k: 'sim', l: 'Sim-only', s: 'zero real labels', c: '--sim' },
+    { k: 'simreal', l: 'Sim + Real', s: 'fine-tuned', c: '--sim', mix: true }
+  ];
+  const X0 = 56, Y0 = 40, H = 220, W = 580, BW = 96;
+  function el(tag, a, p) { const e = document.createElementNS(NS, tag); for (const k in a) e.setAttribute(k, a[k]); (p || $('sh-bars')).appendChild(e); return e; }
+  const barEls = [];
+  function buildBars() {
+    const svg = $('sh-bars'); svg.innerHTML = '';
+    const defs = el('defs', {});
+    const g = el('linearGradient', { id: 'sh-mix', x1: 0, y1: 0, x2: 0, y2: 1 }, defs);
+    el('stop', { offset: '0', 'stop-color': css('--sim') }, g); el('stop', { offset: '.75', 'stop-color': css('--sim') }, g); el('stop', { offset: '.75', 'stop-color': css('--real') }, g);
+    [0, 50, 100].forEach(v => {
+      const y = Y0 + H - H * v / 100;
+      el('line', { x1: X0, x2: X0 + W, y1: y, y2: y, class: v ? 'gl' : 'ax' });
+      const t = el('text', { x: X0 - 12, y: y + 5, 'text-anchor': 'end' }); t.textContent = v + '%';
+    });
+    barEls.length = 0;
+    bars.forEach((b, i) => {
+      const cx = X0 + 40 + i * ((W - 80) / 3) , x = cx - BW / 2 + 0;
+      const r = el('rect', { x, y: Y0 + H, width: BW, height: 0, rx: 4, fill: b.mix ? 'url(#sh-mix)' : css(b.c) });
+      const v = el('text', { x: cx, y: Y0 + H - 10, 'text-anchor': 'middle', class: 'bv', opacity: 0 }); v.textContent = '0%';
+      const l = el('text', { x: cx, y: Y0 + H + 30, 'text-anchor': 'middle', class: 'bl' }); l.textContent = b.l;
+      const s = el('text', { x: cx, y: Y0 + H + 52, 'text-anchor': 'middle' }); s.textContent = b.s;
+      barEls.push({ r, v, b, cx });
+    });
+  }
+  function growBars(tk) {
+    barEls.forEach((o, i) => {
+      const to = metrics.bars[o.b.k], t0 = performance.now() + i * 140;
+      (function step(n) {
+        if (tk !== token) return;
+        const p = Math.max(0, Math.min(1, (n - t0) / 700)), val = to * ease(p), h = H * val / 100;
+        o.r.setAttribute('y', Y0 + H - h); o.r.setAttribute('height', h);
+        o.v.setAttribute('y', Y0 + H - h - 12); o.v.setAttribute('opacity', p > 0 ? 1 : 0); o.v.textContent = Math.round(val) + '%';
+        if (o.b.k === 'sim') o.v.style.fill = css('--sim');
+        if (p < 1) requestAnimationFrame(step);
+      })(performance.now());
+    });
+  }
+
+  // ---- drift plot: top-down path, 10 s. DEMO: synthetic. WIRE: GET /files/metrics.json.drift {cam:[[x,y]..], imu:[[x,y]..]} ----
+  const PX = 28, PY = 18, PW = 384, PH = 196;
+  function buildDrift() {
+    const grid = document.querySelector('#sh-drift .grid'); grid.innerHTML = '';
+    for (let i = 0; i <= 4; i++) { const x = PX + PW * i / 4, y = PY + PH * i / 4; [[x, PY, x, PY + PH], [PX, y, PX + PW, y]].forEach(a => { const l = document.createElementNS(NS, 'line'); ['x1', 'y1', 'x2', 'y2'].forEach((k, j) => l.setAttribute(k, a[j])); grid.appendChild(l); }); }
+    const N = 100, cam = [], imu = [];
+    for (let i = 0; i <= N; i++) {
+      const u = i / N, t = u * 10;
+      const x = .08 + .62 * u + .06 * Math.sin(u * 9), y = .5 + .30 * Math.sin(u * 5.5) * (1 - .3 * u);
+      cam.push([x, y]);
+      const e = Math.pow(u, 2.1);              // quadratic-ish drift growth
+      imu.push([x + e * .22 + .01 * Math.sin(t * 5) * u, y - e * .34 + .01 * Math.cos(t * 4) * u]);
+    }
+    if (metrics.drift && metrics.drift.cam && metrics.drift.cam.length > 1) { cam.length = 0; imu.length = 0; metrics.drift.cam.forEach(p => cam.push(p)); metrics.drift.imu.forEach(p => imu.push(p)); }
+    const P = a => a.map((p, i) => (i ? 'L' : 'M') + (PX + p[0] * PW).toFixed(1) + ' ' + (PY + p[1] * PH).toFixed(1)).join(' ');
+    $('sh-dcam').setAttribute('d', P(cam)); $('sh-dimu').setAttribute('d', P(imu));
+    const a = cam[cam.length - 1], b = imu[imu.length - 1];
+    const ax = PX + a[0] * PW, ay = PY + a[1] * PH, bx = PX + b[0] * PW, by = PY + b[1] * PH;
+    $('sh-dc1').setAttribute('cx', ax); $('sh-dc1').setAttribute('cy', ay); $('sh-dc2').setAttribute('cx', bx); $('sh-dc2').setAttribute('cy', by);
+    const l = $('sh-derrl'); l.setAttribute('x1', ax); l.setAttribute('y1', ay); l.setAttribute('x2', bx); l.setAttribute('y2', by);
+    const t = $('sh-derr'), mx = (ax + bx) / 2, my = (ay + by) / 2; t.setAttribute('x', Math.max(PX + 40, Math.min(PX + PW - 40, mx))); t.setAttribute('y', Math.max(PY + 18, Math.min(PY + PH - 6, my - 12))); t.setAttribute('text-anchor', 'middle');
+  }
+  function drawDrift(tk) {
+    const A = $('sh-dcam'), B = $('sh-dimu'), E = $('sh-dend'), t0 = performance.now();
+    [A, B].forEach(p => { p.style.strokeDasharray = 1; p.style.strokeDashoffset = 1; });
+    E.style.opacity = 0; $('sh-derr').textContent = '';
+    (function step(n) {
+      if (tk !== token) return;
+      const p = Math.min(1, (n - t0) / 1400);
+      A.style.strokeDashoffset = 1 - ease(p); B.style.strokeDashoffset = 1 - ease(p);
+      $('sh-derrbig').textContent = (metrics.drift_m * ease(p)).toFixed(1) + ' m';
+      if (p < 1) requestAnimationFrame(step); else {
+        B.style.strokeDasharray = ''; B.style.strokeDashoffset = '';
+        B.setAttribute('class', 'imu'); B.style.strokeDasharray = '9 7';
+        E.style.opacity = 1; $('sh-derr').textContent = metrics.drift_m.toFixed(1) + ' m';
+      }
+    })(t0);
+  }
+
+  // ---- reveal ----
+  function reset() {
+    token++;
+    $('sh-hero').classList.remove('shown', 'pop');
+    $('sh-acc').textContent = '--%'; $('sh-auc').textContent = 'AUC --';
+    ['sh-er', 'sh-es', 'sh-fr'].forEach(i => $(i).textContent = '0'); $('sh-hr').textContent = '0.0'; $('sh-sz').textContent = '0 MB';
+    $('sh-derrbig').textContent = '0.0 m';
+    buildBars(); buildDrift();
+    document.querySelectorAll('#sh-dcam,#sh-dimu').forEach(p => { p.style.strokeDasharray = 1; p.style.strokeDashoffset = 1; });
+    $('sh-dend').style.opacity = 0;
+  }
+  async function loadData() {
+    // WIRE: GET /files/metrics.json and /files/dataset_stats.json (M.api + path); fall back to placeholders above
+    try {
+      const [m, s] = await Promise.all(['/files/metrics.json', '/files/dataset_stats.json'].map(u => fetch((M.api || '') + u + '?' + Date.now()).then(r => { if (!r.ok) throw 0; return r.json(); })));
+      metrics = Object.assign(metrics, m); stats = Object.assign(stats, s);
+      if (m.hero_label) $('sh-herolabel').textContent = m.hero_label;
+    } catch (e) { /* demo placeholders */ }
+  }
+  async function reveal() {
+    reset();
+    await loadData(); buildDrift(); buildBars();
+    const tk = token;
+    // 1. dataset stats count up
+    count($('sh-er'), stats.episodes_real, 900, fmt.int, tk); count($('sh-es'), stats.episodes_sim, 1200, fmt.int, tk);
+    count($('sh-fr'), stats.frames, 1400, fmt.int, tk); count($('sh-hr'), stats.hours, 1200, fmt.d1, tk); count($('sh-sz'), stats.size_mb, 1200, fmt.mb, tk);
+    const lk = document.querySelector('#scr-ship .like b'); if (lk) lk.textContent = '0';
+    $('sh-sizepill').textContent = stats.episodes_sim + stats.episodes_real >= 1000 ? '1K - 10K' : '100 - 1K';
+    // 2. bars, 3. drift, 4. hero last
+    setTimeout(() => tk === token && growBars(tk), 400);
+    setTimeout(() => tk === token && drawDrift(tk), 1300);
+    setTimeout(() => {
+      if (tk !== token) return;
+      const h = $('sh-hero'); h.classList.add('shown', 'pop');
+      count($('sh-acc'), metrics.acc, 1300, v => Math.round(v), tk, '', '%');
+      count($('sh-auc'), metrics.auc, 1300, v => v.toFixed(2), tk, 'AUC ', '');
+    }, 3000);
+  }
+  M.on('screen', id => { if (id === 'ship') reveal(); });
+
+  // ---- buttons ----
+  const say = (t, ok = true) => { const m = $('sh-msg'); m.textContent = t; m.style.color = ok ? css('--ok') : css('--slip'); };
+  async function post(path, body, okMsg) {
+    say('Working...'); $('sh-msg').style.color = css('--text-muted');
+    if (window.MIMESIS_DEMO) { await new Promise(r => setTimeout(r, 900)); return say(okMsg); }
+    try { const r = await fetch((M.api || '') + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) }); if (!r.ok) throw 0; say(okMsg); }
+    catch (e) { say('Request failed: ' + path, false); }
+  }
+  // WIRE: POST /export  -> writes LeRobot v3 dataset folder
+  $('sh-export').onclick = () => post('/export', { format: 'lerobot_v3' }, 'Exported LeRobot v3 dataset');
+  // WIRE: POST /export/push  -> push_to_hub mimesis/pick-up-cup
+  $('sh-push').onclick = () => post('/export/push', { repo: 'mimesis/pick-up-cup' }, 'Pushed to huggingface.co/mimesis/pick-up-cup');
+  // WIRE: POST /export/open  -> opens the dataset folder in Finder
+  $('sh-open').onclick = () => post('/export/open', {}, 'Opened dataset folder');
+
+  reset();
+})();
+</script>
+
+</main>
+
+<footer id="ticker">
+  <span class="r">Real demos<b id="tk-real">12</b></span>
+  <span class="s">Simulated episodes<b id="tk-sim">1,200</b></span>
+  <span>Hours of data<b id="tk-hours">3.4</b></span>
+  <span class="right">NullHacks Helsinki · 21.11.2026</span>
+</footer>
+
+<script>
+/* fit the 1920x1080 stage into any window (laptop screen, projector) */
+(() => {
+  const fit = () => {
+    const k = Math.min(innerWidth / 1920, innerHeight / 1080);
+    document.body.style.transformOrigin = '0 0';
+    document.body.style.transform = k < 0.999 || k > 1.001 ? `translate(${(innerWidth - 1920 * k) / 2}px,0) scale(${k})` : '';
+    document.documentElement.style.background = getComputedStyle(document.body).backgroundColor;
+  };
+  addEventListener('resize', fit); addEventListener('DOMContentLoaded', fit);
+})();
+
+/* tabs: hash routing + keys 1-4 for the pitch */
+(() => {
+  const ids = ['record', 'episode', 'multiply', 'ship'];
+  function show() {
+    const id = ids.includes(location.hash.slice(1)) ? location.hash.slice(1) : 'record';
+    document.querySelectorAll('.screen').forEach(s => s.classList.toggle('on', s.id === 'scr-' + id));
+    document.querySelectorAll('#tabs a').forEach(a => {
+      const i = ids.indexOf(a.dataset.s);
+      a.classList.toggle('on', a.dataset.s === id);
+      a.classList.toggle('done', i < ids.indexOf(id));
+    });
+    M.emit('screen', id);
+  }
+  addEventListener('hashchange', show);
+  addEventListener('keydown', e => { if (e.target.closest('input,select,textarea')) return; const i = '1234'.indexOf(e.key); if (i >= 0) location.hash = ids[i]; });
+  addEventListener('DOMContentLoaded', show);
+})();
+
+/* status pills */
+M.on('status', s => {
+  const w = document.getElementById('st-wrist'), c = document.getElementById('st-cam');
+  w.className = 'pill ' + (s.wrist ? 'live' : 'off'); c.className = 'pill ' + (s.camera ? 'live' : 'off');
+  document.getElementById('st-hz').textContent = s.wrist ? Math.round(s.hz) + ' Hz' : '— Hz';
+  document.getElementById('st-eps').textContent = s.episodes;
+});
+
+/* ---------- LIVE data source: WebSocket /ws, polling /latest + /status as fallback. ----------
+   Served by receiver.py (http:) -> live. Opened as a file or with ?demo -> synthetic DEMO block below. */
+window.MIMESIS_DEMO = location.protocol === 'file:' || /[?&]demo\b/.test(location.search);
+/* static host (GitHub Pages): recorded results from ./files, no server, no live phone stream */
+window.MIMESIS_STATIC = /github\.io$/.test(location.hostname) || /[?&]static\b/.test(location.search);
+if (MIMESIS_STATIC) M.api = '.';
+M.camera = false;
+if (!MIMESIS_DEMO && !MIMESIS_STATIC) addEventListener('DOMContentLoaded', () => {
+  let ws = null, polling = null, lastStatus = { wrist: false, hz: 0, episodes: 0 }, lastT = -1;
+  const emitImu = s => {
+    if (s.t <= lastT) return; lastT = s.t;
+    M.emit('imu', { ...s, a: Math.hypot(s.ax, s.ay, s.az), g: Math.hypot(s.gx, s.gy, s.gz) });
+  };
+  const emitStatus = st => { lastStatus = { ...lastStatus, ...st }; M.emit('status', { ...lastStatus, camera: M.camera }); M.emit('jobs', st.jobs || {}); };
+  function connect() {
+    ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws');
+    ws.onopen = () => { if (polling) { clearInterval(polling); polling = null; } };
+    ws.onmessage = e => {
+      const m = JSON.parse(e.data);
+      (m.imu || []).forEach(emitImu);
+      (m.contacts || []).forEach(c => M.emit('contact', c));
+      if (m.status) emitStatus(m.status);
+    };
+    ws.onclose = () => { startPolling(); setTimeout(connect, 2000); };
+  }
+  // fallback: GET /latest every 100 ms, GET /status every 1 s
+  let t0ns = null;
+  function startPolling() {
+    if (polling) return; let k = 0;
+    polling = setInterval(async () => {
+      try {
+        const r = await (await fetch('/latest?n=50')).json();
+        r.samples.forEach(s => { t0ns = t0ns || s.time_ns; emitImu({ t: (s.time_ns - t0ns) / 1e9, ax: s.ax, ay: s.ay, az: s.az, gx: s.gx, gy: s.gy, gz: s.gz, q: [s.qw, s.qx, s.qy, s.qz] }); });
+        if (k++ % 10 === 0) { const st = await (await fetch('/status')).json(); emitStatus({ wrist: st.hz > 1, hz: st.hz, episodes: st.episodes, recording: !!st.active_episode, jobs: st.jobs }); }
+      } catch (e) { emitStatus({ wrist: false, hz: 0 }); }
+    }, 100);
+  }
+  ['tk-real','tk-sim','tk-hours'].forEach(i => document.getElementById(i).textContent = '0');
+  connect();
+  setInterval(() => M.emit('status', { ...lastStatus, camera: M.camera }), 1000);
+  // ticker: real numbers
+  const tick = async () => { try {
+    const s = await (await fetch('/files/dataset_stats.json', { cache: 'no-store' })).json();
+    document.getElementById('tk-real').textContent = (s.episodes_real || 0).toLocaleString('en-US');
+    document.getElementById('tk-sim').textContent = (s.episodes_sim || 0).toLocaleString('en-US');
+    document.getElementById('tk-hours').textContent = (s.hours || 0).toFixed(2);
+  } catch (e) {} };
+  tick(); setInterval(tick, 5000);
+});
+if (MIMESIS_DEMO) addEventListener('DOMContentLoaded', () => {
+  let t = 0, eps = 12;
+  const kinds = ['GRAB', 'TAP', 'SLIP', 'SET-DOWN'];
+  let nextEv = 1.2, evIdx = 0, spike = 0;
+  setInterval(() => M.emit('status', { wrist: true, hz: 99 + Math.random() * 2, camera: true, episodes: eps }), 1000);
+  setInterval(() => {
+    for (let k = 0; k < 5; k++) {           // 5 samples / 50 ms = 100 Hz
+      t += 0.01;
+      if (t > nextEv) { M.emit('contact', { t, kind: kinds[evIdx % 4] }); spike = 1; evIdx++; nextEv = t + 1.1 + Math.random() * 1.4; }
+      spike *= 0.9;
+      const n = () => (Math.random() - .5) * .35;
+      const ax = Math.sin(t * 1.3) * .8 + n() + spike * 9 * Math.sin(t * 90), ay = Math.cos(t * .9) * .6 + n(), az = 9.81 + Math.sin(t * 2.1) * .5 + n() + spike * 5;
+      const gx = Math.sin(t * 1.7) * .9 + n(), gy = Math.cos(t * 1.1) * .7 + n(), gz = Math.sin(t * .6) * .5 + n() + spike * 3;
+      M.emit('imu', { t, ax, ay, az, gx, gy, gz, a: Math.hypot(ax, ay, az), g: Math.hypot(gx, gy, gz),
+        q: [Math.cos(t * .4), Math.sin(t * .4) * .3, Math.sin(t * .7) * .2, Math.sin(t * .3) * .2] });
+    }
+  }, 50);
+  // fake 21-joint hand: wrist + 5 fingers x 4 joints, gently breathing
+  setInterval(() => {
+    const cx = .52 + Math.sin(t * .5) * .04, cy = .62 + Math.cos(t * .4) * .03, open = .75 + Math.sin(t * 1.2) * .25;
+    const j = [[cx, cy]];
+    [-.42, -.2, 0, .18, .34].forEach((a, f) => {
+      for (let s = 1; s <= 4; s++) { const r = (.045 + s * .032 * (f ? 1 : .8)) * (f ? open : 1); j.push([cx + Math.sin(a * 1.6) * r * 1.1, cy - Math.cos(a * 1.6) * r * 1.6]); }
+    });
+    M.emit('hand', { joints: j });
+  }, 33);
+});
+</script>
+</body>
+</html>

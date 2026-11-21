@@ -1,0 +1,1 @@
+{"episodes_real": 1, "episodes_sim": 10, "frames": 71963, "hours": 0.666, "size_mb": 22.0, "fps": 30, "episodes": [{"n": 0, "id": "ep_173510", "task": "pick up cup", "duration": 48.73}], "sim_ok": 7, "sim_slip": 3}
