@@ -135,10 +135,10 @@ def process_video_only(eid: str) -> dict:
            "frames": int(round(vdur * 30)), "sync_offset_ms": 0, "contacts": contacts, "gripper": gripper,
            "imu": ap100, "imu_hz": 100, "signal": "finger opening (cm)"}
     shutil.copy(overlay, PUB / f"ep_{eid}_overlay.mp4")
-    pub["overlay"] = f"/files/ep_{eid}_overlay.mp4"
+    pub["overlay"] = f"/files/ep_{eid}_overlay.mp4?v={int(time.time())}"
     if twin:
         shutil.copy(twin, PUB / f"ep_{eid}_twin.mp4")
-        pub["twin"] = f"/files/ep_{eid}_twin.mp4"
+        pub["twin"] = f"/files/ep_{eid}_twin.mp4?v={int(time.time())}"
     (PUB / f"ep_{eid}.json").write_text(json.dumps(pub))
     publish_index()
     step("done (video only)")
@@ -222,14 +222,14 @@ def process(eid: str) -> dict:
     if overlay.exists():
         shutil.copy(overlay, PUB / f"ep_{eid}_overlay.mp4")
         shutil.copy(overlay, PUB / "episode_overlay.mp4")
-        pub["overlay"] = f"/files/ep_{eid}_overlay.mp4"
+        pub["overlay"] = f"/files/ep_{eid}_overlay.mp4?v={int(time.time())}"
     elif video is not None:
         h264(video, PUB / f"ep_{eid}_overlay.mp4")
-        pub["overlay"] = f"/files/ep_{eid}_overlay.mp4"
+        pub["overlay"] = f"/files/ep_{eid}_overlay.mp4?v={int(time.time())}"
     if twin:
         shutil.copy(twin, PUB / f"ep_{eid}_twin.mp4")
         shutil.copy(twin, PUB / "sim_twin.mp4")
-        pub["twin"] = f"/files/ep_{eid}_twin.mp4"
+        pub["twin"] = f"/files/ep_{eid}_twin.mp4?v={int(time.time())}"
     (PUB / f"ep_{eid}.json").write_text(json.dumps(pub))
     publish_index()
     step(f"done: {len(contacts)} contacts, offset {offset * 1000:+.0f} ms")

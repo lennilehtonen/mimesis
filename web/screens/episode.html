@@ -193,7 +193,7 @@
   async function loadEpisode(n) {
     let d = null;
     try { // WIRE: GET /files/episode_<n>.json
-      const r = await fetch((M.api || '') + '/files/episode_' + n + '.json'); if (r.ok) d = await r.json();
+      const r = await fetch((M.api || '') + '/files/episode_' + n + '.json?' + Date.now(), { cache: 'no-store' }); if (r.ok) d = await r.json();
     } catch (e) {}
     if (d) {
       d.imu = Float32Array.from(d.imu || []); d.imu_hz = d.imu_hz || 100; d.fps = d.fps || FPS;
