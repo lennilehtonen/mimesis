@@ -91,17 +91,24 @@ def build_scene_xml(obj_type: str = "cup", mass: float = 0.25, friction: float =
       <freejoint name="wrist_free"/>
       <inertial pos="0 0 0.02" mass="0.35" diaginertia="0.0006 0.0006 0.0004"/>
       <site name="imu_site" pos="0 0 0.02" size="0.006" rgba="0 1 0 1"/>
-      <geom name="palm" type="box" size="0.085 0.03 0.008" pos="0 0 0.045" mass="0.0" rgba="0.2 0.2 0.22 1"/>
-      <geom name="phone" type="box" size="0.035 0.07 0.004" pos="0 0 0.062" contype="0" conaffinity="0" mass="0.0" rgba="0.05 0.05 0.06 1"/>
+      <geom name="palm" type="ellipsoid" size="0.075 0.048 0.022" pos="0 0 0.05" mass="0.0" rgba="0.92 0.74 0.62 1"/>
+      <geom name="knuckles" type="capsule" fromto="0.03 -0.036 0.035 0.03 0.036 0.035" size="0.013" contype="0" conaffinity="0" mass="0.0" rgba="0.92 0.74 0.62 1"/>
+      <geom name="phone" type="box" size="0.035 0.07 0.004" pos="0 0 0.062" contype="0" conaffinity="0" mass="0.0" rgba="0 0 0 0"/>
       <body name="finger_l" pos="0 0 0">
         <joint name="grip_l" type="slide" axis="1 0 0" range="-0.005 0.042" damping="4"/>
-        <geom name="pad_l" type="box" size="0.006 0.018 0.05" pos="{-(fx + 0.006):.4f} 0 -0.015" mass="0.03"
-              friction="0.95 0.01 0.001" condim="4" rgba="0.15 0.15 0.15 1"/>
+        <geom name="pad_l" type="box" size="0.008 0.016 0.05" pos="{-(fx + 0.006):.4f} 0 -0.015" mass="0.03"
+              friction="1.4 0.02 0.002" condim="4" rgba="0 0 0 0"/>
+        <geom name="thumb" type="capsule" fromto="{-(fx + 0.008):.4f} 0 0.04 {-(fx + 0.008):.4f} 0 -0.05" size="0.012"
+              contype="0" conaffinity="0" mass="0.0" rgba="0.92 0.74 0.62 1"/>
       </body>
       <body name="finger_r" pos="0 0 0">
         <joint name="grip_r" type="slide" axis="-1 0 0" range="-0.005 0.042" damping="4"/>
-        <geom name="pad_r" type="box" size="0.006 0.018 0.05" pos="{fx + 0.006:.4f} 0 -0.015" mass="0.03"
-              friction="0.95 0.01 0.001" condim="4" rgba="0.15 0.15 0.15 1"/>
+        <geom name="pad_r" type="box" size="0.008 0.034 0.05" pos="{fx + 0.006:.4f} 0 -0.015" mass="0.03"
+              friction="1.4 0.02 0.002" condim="4" rgba="0 0 0 0"/>
+        <geom name="f_index" type="capsule" fromto="{fx + 0.008:.4f} -0.027 0.035 {fx + 0.008:.4f} -0.027 -0.062" size="0.0095" contype="0" conaffinity="0" mass="0.0" rgba="0.92 0.74 0.62 1"/>
+        <geom name="f_middle" type="capsule" fromto="{fx + 0.008:.4f} -0.009 0.035 {fx + 0.008:.4f} -0.009 -0.07" size="0.0098" contype="0" conaffinity="0" mass="0.0" rgba="0.92 0.74 0.62 1"/>
+        <geom name="f_ring" type="capsule" fromto="{fx + 0.008:.4f} 0.009 0.035 {fx + 0.008:.4f} 0.009 -0.065" size="0.0094" contype="0" conaffinity="0" mass="0.0" rgba="0.92 0.74 0.62 1"/>
+        <geom name="f_pinky" type="capsule" fromto="{fx + 0.008:.4f} 0.027 0.035 {fx + 0.008:.4f} 0.027 -0.052" size="0.0085" contype="0" conaffinity="0" mass="0.0" rgba="0.92 0.74 0.62 1"/>
       </body>
     </body>
   </worldbody>
@@ -114,8 +121,8 @@ def build_scene_xml(obj_type: str = "cup", mass: float = 0.25, friction: float =
     <exclude body1="finger_l" body2="finger_r"/>
   </contact>
   <actuator>
-    <position name="act_grip_l" joint="grip_l" kp="350" ctrlrange="-0.005 0.042"/>
-    <position name="act_grip_r" joint="grip_r" kp="350" ctrlrange="-0.005 0.042"/>
+    <position name="act_grip_l" joint="grip_l" kp="700" ctrlrange="-0.005 0.042"/>
+    <position name="act_grip_r" joint="grip_r" kp="700" ctrlrange="-0.005 0.042"/>
   </actuator>
   <sensor>
     <accelerometer name="wrist_accel" site="imu_site"/>

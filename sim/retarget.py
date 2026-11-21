@@ -367,6 +367,12 @@ def retarget_exact(hands_df: pd.DataFrame, width: int, height: int, video_path=N
     a_closed = float(np.nanmedian(ap[win])) if win.any() else float(apf[ig])
     a_closed = min(a_closed, thr)
     u = np.clip((np.interp(t, tf, apf) - a_closed) / max(a_open - a_closed, 1e-6), 0.0, 1.0)
+    # firm grip: when the human hand is closed (lower half of its opening range) the jaw closes fully
+    u = np.where(u < 0.5, 0.0, (u - 0.5) * 2.0)
+    u = pd.Series(u).rolling(15, center=True, min_periods=1).mean().to_numpy()
+    # firm grip: when the human hand is closed (lower half of its opening range) the hand closes fully
+    u = np.where(u < 0.5, 0.0, (u - 0.5) * 2.0)
+    u = pd.Series(u).rolling(15, center=True, min_periods=1).mean().to_numpy()
     grip = GRIP_CLOSED - u * (GRIP_CLOSED - GRIP_OPEN)
 
     # place the cup under the hand at the first closure; shift z so the wrist sits at grasp height there
