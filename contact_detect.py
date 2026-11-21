@@ -126,8 +126,8 @@ def detect_contacts(df: pd.DataFrame, jerk_thresh: float = 20.0, accel_peak_thre
     # 1. TAP: impulsive spike, far above the local (0.5 s) acceleration level
     base = _rolling(amag, 50, "median")
     ratio = amag_peak / (base + 0.15)
-    jt = max(jerk_thresh * 7.5, 10.0 * float(np.median(jerk)) if n else 0.0)   # ~150 m/s^3 at defaults
-    cand = np.where((jerk > jt) & (amag_peak > 2.0 * accel_peak_thresh) & (ratio > 4.0))[0]
+    jt = max(jerk_thresh * 5.0, 8.0 * float(np.median(jerk)) if n else 0.0)   # ~100 m/s^3 at defaults
+    cand = np.where((jerk > jt) & (amag_peak > 1.7 * accel_peak_thresh) & (ratio > 2.5))[0]
     taps = []
     i = 0
     while i < len(cand):
@@ -157,14 +157,14 @@ def detect_contacts(df: pd.DataFrame, jerk_thresh: float = 20.0, accel_peak_thre
     # 3. SLIP / SCRAPE: sustained high-frequency vibration that dominates the gross motion
     lp = _rolling(amag, 50, "mean")
     vt = max(slip_hpf_thresh, 3.0 * float(np.median(slip)) if n else 0.0)
-    hot = (slip > vt) & (slip > 0.8 * (lp + 0.1))
+    hot = (slip > vt) & (slip > 0.55 * (lp + 0.1))
     k = 0
     while k < n:
         if hot[k]:
             e2 = k
             while e2 + 1 < n and hot[e2 + 1]:
                 e2 += 1
-            if t[e2] - t[k] >= 0.2 and not (len(tap_t) and np.any(np.abs(tap_t - t[k]) < 0.3)):
+            if t[e2] - t[k] >= 0.15 and not (len(tap_t) and np.any(np.abs(tap_t - t[k]) < 0.2)):
                 m = int(k + np.argmax(slip[k:e2 + 1]))
                 events.append(ev("slip_or_scrape", m))
                 ids[k:e2 + 1] = EVENT_IDS["slip_or_scrape"]
