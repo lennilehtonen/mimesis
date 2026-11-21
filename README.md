@@ -107,18 +107,31 @@ Capture protocol, the 18-task list, and Wi-Fi / hotspot troubleshooting: [docs/D
 ## Quickstart
 
 ```bash
-# Python 3.11 or 3.12. Install ffmpeg if needed: brew install ffmpeg
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-
-# End-to-end synthetic verification (~45–60 s). No phones required.
-python test_pipeline.py
-
-# Pre-fetch the MediaPipe hand model (also downloaded automatically on first use)
-python -c "from hands import ensure_hand_model; ensure_hand_model()"
+# macOS, Python 3.12, ffmpeg (brew install ffmpeg)
+./run.sh
 ```
 
-`test_pipeline.py` exercises HTTP ingest, contact detection, clap-sync, real and sim LeRobot export, retargeting, 12 MuJoCo variants (9 rendered), sim-to-real, and `demo_grid.py`.
+`run.sh` creates `.venv` and installs `requirements.txt` on first run, prints the **Sensor Logger HTTP Push URL** for the iPhone USB / Personal Hotspot network (`172.20.10.x`), starts the receiver on port 8000 and opens the dashboard at `http://localhost:8000/`.
+
+**Dashboard** (keys `1`–`4` switch tabs; add `?demo` to the URL for synthetic data without phones):
+
+| Tab | What it does |
+|---|---|
+| 1 Record | Chest cam via Continuity Camera (`getUserMedia`) with a MediaPipe Tasks JS hand skeleton in the browser, live 100 Hz wrist IMU over WebSocket `/ws`, GRAB / TAP / SLIP / SET-DOWN chips. RECORD calls `/episode/start`, records the camera + audio in the browser and uploads it on stop; processing (hands, clap-sync, contacts, MuJoCo twin) starts automatically. |
+| 2 Episode | Real overlay MP4 and MuJoCo twin in sync, IMU timeline, contact chips. |
+| 3 Multiply | Slider 10–1,000 + Generate: `sim.augment` in a subprocess with live progress, 3×3 grid of rendered variants (OK / SLIP), OK vs SLIP donut. |
+| 4 Ship | Sim-to-real metric card, baselines, IMU drift vs camera plot, dataset card, Export to LeRobot v3. |
+
+Setup helpers: `scripts/find_mac_ip.sh` prints the Mac IP on the iPhone USB network and the exact Sensor Logger URL (it changes when the tether reconnects). If HTTP push is blocked, record locally in Sensor Logger and use `python receiver.py --import-csv-dir <folder>`.
+
+```bash
+# End-to-end synthetic verification (~20–60 s). No phones required.
+.venv/bin/python test_pipeline.py      # prints ALL 10 CHECKS PASSED
+```
+
+`test_pipeline.py` exercises HTTP ingest + WebSocket, contact detection, hands, clap-sync, MuJoCo variants (9 rendered), sim and real LeRobot export, sim-to-real and `demo_grid.py`.
+
+Pipeline jobs can also be run without the UI: `python jobs.py process <episode>`, `process_all`, `multiply <episode> --n 300`, `metrics`, `export`.
 
 ---
 
@@ -184,7 +197,7 @@ python hands.py --live --camera 0
 python contact_detect.py data/raw_imu/ep_001.parquet \
   --out data/raw_imu/ep_001_contacts.parquet \
   --events-json data/raw_imu/ep_001_contacts.events.json \
-  --jerk-thresh 45.0 --accel-thresh 3.5 --slip-thresh 0.75
+  --jerk-thresh 20.0 --accel-thresh 1.5 --slip-thresh 0.6
 
 python sync.py \
   --video data/videos/ep_001.mov \
@@ -259,12 +272,16 @@ Schema: [docs/DATASET.md](docs/DATASET.md). Simulation internals: [docs/SIMULATI
 ## Repository structure
 
 ```
-rig/
+memesis/
   README.md
   requirements.txt
-  receiver.py              # FastAPI Sensor Logger ingest + CSV import
+  run.sh                   # one command: venv, Sensor Logger URL, server, browser
+  receiver.py              # FastAPI: Sensor Logger ingest, /ws live stream, jobs, dashboard
+  jobs.py                  # pipeline jobs run by the dashboard (process / multiply / metrics / export)
+  web/                     # dashboard (shell.html + screens/*.html -> index.html, vendored MediaPipe JS)
+  scripts/                 # find_mac_ip.sh, build_ui.py, make_synthetic.py
   hands.py                 # MediaPipe Hands → 21 landmarks + speeds
-  contact_detect.py        # Jerk / slip event detector
+  contact_detect.py        # GRAB / SET-DOWN (motion bursts), TAP (spikes), SLIP (vibration)
   sync.py                  # Clap-sync audio ↔ IMU, frame-aligned parquet
   export.py                # LeRobot v3-style packager
   live_viz.py              # Live / replay IMU + drift dashboard
@@ -337,18 +354,22 @@ Per-frame features in `data/chunk-000/file-000.parquet`:
 
 ## Results
 
-Replace the placeholders with numbers from **your recorded episodes** before the pitch. Synthetic figures below come from `python test_pipeline.py` on this box (no phones) and must be labeled as such if you mention them.
+Measured at NullHacks Helsinki on 21 Nov 2026: 10 real wrist-IMU takes of "pick up cup" (Sensor Logger, 100 Hz over USB tethering, 1,451 s total), multiplied into 300 MuJoCo variants from one take (`ep_155834`).
 
-| Metric | On real phone data (fill in) | Synthetic regression test (`test_pipeline.py`) |
+| Metric | Real phone data | Synthetic regression test (`test_pipeline.py`) |
 |---|---|---|
-| Clap-sync offset error | _TBD ms_ (see `data/aligned/*.sync.json`) | **10.0 ms** (`offset = +0.810 s` vs truth `+0.800 s`) |
-| Contact transients found on one clip | _TBD_ | 8 transients + `slip_or_scrape` on the synthetic IMU |
-| Simulated variants / success / slip | _TBD_ (see `data/sim_aug/manifest.json`) | 12 variants: **7 success, 5 slips**, 9 MP4s rendered |
-| Zero-shot sim→real contact detection | _accuracy / balanced accuracy / F1 / ROC-AUC from `sim_to_real_report.json`_ | **ROC-AUC 0.81**, balanced acc. 60.8%, accuracy 55.5% on the **synthetic-real** clip |
-| Real episodes in LeRobot export | _TBD frames @ 30 fps_ | 210 frames from the 7 s synthetic video |
-| Demo assets | `data/mimesis_demo.mp4`, `data/mimesis_demo.png` | Built successfully (~265 KB MP4, ~205 KB PNG in the test run) |
+| Wrist IMU ingest | 99.7 Hz effective over USB Personal Hotspot | 100 Hz |
+| Contact events (GRAB / SET-DOWN / TAP / SLIP) | 475 events over 10 takes, e.g. 26 grabs / 27 set-downs / 18 taps / 6 slips in a 250 s take | all 4 planted kinds found at the planted times |
+| Simulated variants | **300 variants: 99 success, 149 slip, 52 other failures**, 9 rendered MP4s | 12 variants: 8 success, 4 slip |
+| Contact detection, **sim + real** training, tested on held-out real takes (leave-one-take-out) | **balanced accuracy 77 %, ROC-AUC 0.85** | — |
+| Contact detection, real-only training (leave-one-take-out) | balanced accuracy 70 % | — |
+| Contact detection, **sim-only** training, zero-shot on all 10 real takes | balanced accuracy 65 %, ROC-AUC 0.75 (28,833 windows, 10 % positive) | ROC-AUC 0.90, balanced acc. 83 % (synthetic "real" clip) |
+| Naive IMU double integration drift | 12.9 m after 10 s | ~13 m after 12 s |
+| LeRobot v3 export | real: 10 episodes, 48,085 frames; sim: 300 episodes, 120,000 frames | 1 real + 12 sim episodes |
+| Clap-sync offset error | not measured on real takes (only one take had chest video, recorded without claps) | 0 ms (planted +0.800 s, recovered +0.800 s) |
+| Demo assets | `data/mimesis_demo.mp4`, `data/mimesis_demo.png` (real clip, MuJoCo twin, 3×3 grid) | built in the test run |
 
-The synthetic AUC is a pipeline smoke test, not a claim about generalization to a held-out human. After you record real demos, run `python -m sim.sim_to_real --sim-dir data/sim_aug/episodes --real data/raw_imu/ep_001.parquet data/raw_imu/ep_002.parquet ...` and put those numbers on the slide.
+Labels on real data come from `contact_detect.py` (a rule-based detector), not from human annotation, so the accuracies measure how well an IMU classifier trained on simulated data reproduces those event labels on a real wrist. Features are robust-scaled per episode (median / IQR, no labels) and the decision threshold is set from the training positive rate, so no real labels are used by the sim-only model. Adding simulation to the real training data raises held-out balanced accuracy from 70 % to 77 %.
 
 ---
 
@@ -367,7 +388,8 @@ A wrist accelerometer measures **specific force**. To get position you subtract 
 - **Simulation is a pinch gripper, not a human hand.** Contacts, friction cones, and slip labels are physically consistent *inside the engine*, not a digital twin of skin or a GelSight.
 - **Sim-to-real numbers on synthetic IMU are not the same as numbers on a real mug.** Report them separately. The classifier is a 16-feature random forest on 200 ms windows, not a foundation model.
 - **Free-tier Sensor Logger HTTP Push is batched (~1 s)**, not a 10 ms HTTP request per sample. Timestamps inside the batch are still 100 Hz. Venue networks may block phone→Mac HTTP entirely — use a hotspot or the CSV import path.
-- **`export.py` task names** from auto-discovery look for a `task` field in `*.sync.json`. `sync.py` does not currently write `task` there, so folder-mode real exports default to `egocentric_manipulation` unless you pass `--manifest`. Simulated exports set `task` to `{--task}_success` or `{--task}_slip`.
+- **Contact labels are rule-based.** GRAB / SET-DOWN are movement-burst edges with thresholds adapted to each recording's noise floor; TAP is an impulsive spike; SLIP is sustained vibration. They are a proxy for touch, not ground-truth tactile data.
+- **Clap-sync needs the 3 claps** at the start of every take; without them the offset is meaningless. Takes without chest video are processed IMU-only.
 - **Rendered sim video is 320×240** from `side_cam` at ~30 fps; `info.json` still declares egocentric video as `[1080, 1920, 3]`. Treat that shape as a schema hint, not a guaranteed resolution.
 - MuJoCo offscreen rendering must stay on the **main thread** on macOS. Do not start a second `Renderer` from a background worker.
 
