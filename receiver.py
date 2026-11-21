@@ -503,11 +503,6 @@ def multiply_latest(n: int = 100, render: int = 9):
     return multiply(ep, n, render)
 
 
-@app.post("/metrics")
-def metrics_run():
-    return job_view(start_job("metrics", ["jobs.py", "metrics"])["name"])
-
-
 @app.get("/metrics")
 def metrics():
     out = {}
@@ -515,9 +510,6 @@ def metrics():
         p = PUB_DIR / name
         if p.exists():
             out[name.split(".")[0]] = json.loads(p.read_text())
-    rep = DATA / "sim_aug" / "sim_to_real_report.json"
-    if rep.exists():
-        out["sim_to_real_report"] = json.loads(rep.read_text())
     return out
 
 
@@ -626,6 +618,16 @@ def usb_ip() -> tuple[str, str]:
     return "127.0.0.1", "lo0"
 
 
+def build_ui() -> None:
+    """web/index.html = web/shell.html with web/screens/*.html inlined."""
+    parts = []
+    for sid in ("record", "episode", "multiply", "ship"):
+        f = WEB_DIR / "screens" / f"{sid}.html"
+        parts.append(f.read_text() if f.exists() else f'<section id="scr-{sid}" class="screen"></section>')
+    shell = (WEB_DIR / "shell.html").read_text()
+    (WEB_DIR / "index.html").write_text(shell.replace("<!--SCREENS-->", "\n".join(parts)))
+
+
 def main():
     global OUT_DIR
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -641,12 +643,8 @@ def main():
     if a.import_csv_dir:
         import_csv_dir(a.import_csv_dir, a.episode_id, a.task)
         return
-    ip, iface = usb_ip()
-    print("=" * 64)
-    print(f"  MIMESIS receiver on {a.host}:{a.port}  (interface {iface})")
-    print(f"  Sensor Logger HTTP Push URL:  http://{ip}:{a.port}/data")
-    print(f"  Dashboard:                    http://localhost:{a.port}/?live")
-    print("=" * 64, flush=True)
+    build_ui()
+    print(f"MIMESIS dashboard: http://localhost:{a.port}/", flush=True)
     import uvicorn
     uvicorn.run(app, host=a.host, port=a.port, log_level="warning")
 

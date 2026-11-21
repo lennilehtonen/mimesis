@@ -4,7 +4,7 @@ Writes <out-dir>/ep_synth.parquet (raw IMU, 100 Hz, receiver.py format) and
 <out-dir>/ep_synth.mp4 (640x360, 30 fps, AAC audio with 3 clap bursts).
 IMU time = video time + offset.
 
-    python scripts/make_synthetic.py --out-dir /tmp/synth --offset 0.8 --duration 10
+    python -m sim.synthetic --out-dir /tmp/synth --offset 0.8 --duration 10
 """
 from __future__ import annotations
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One command: venv, print the Sensor Logger URL, start the receiver + dashboard, open the browser.
+# One command: venv, start the dashboard server, open the browser.
 set -e
 cd "$(dirname "$0")"
 PORT="${PORT:-8000}"
@@ -8,7 +8,5 @@ if [ ! -d .venv ]; then
   .venv/bin/pip install -q -r requirements.txt
 fi
 source .venv/bin/activate
-python scripts/build_ui.py >/dev/null
-scripts/find_mac_ip.sh "$PORT" || true
 ( sleep 2; open "http://localhost:$PORT/" ) &
 exec python receiver.py --host 0.0.0.0 --port "$PORT"

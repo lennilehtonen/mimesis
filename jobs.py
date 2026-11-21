@@ -146,94 +146,7 @@ def process_video_only(eid: str) -> dict:
 
 
 def process(eid: str) -> dict:
-    if not (RAW / f"{eid}.parquet").exists():
-        return process_video_only(eid)
-    from contact_detect import UI_KIND, detect_contacts
-
-    meta = episode_meta(eid)
-    task = meta.get("task") or "manipulation_task"
-    raw_p = RAW / f"{eid}.parquet"
-    raw = pd.read_parquet(raw_p)
-    step("contacts")
-    lab, events = detect_contacts(raw)
-    lab.to_parquet(RAW / f"{eid}_contacts.parquet", index=False)
-    (RAW / f"{eid}_contacts.events.json").write_text(json.dumps({"input": str(raw_p), "num_events": len(events),
-                                                                "events": events}, indent=2))
-    video = find_video(eid)
-    sync = None
-    hands_p = HANDS / f"{eid}_hands.parquet"
-    overlay = HANDS / f"{eid}_overlay.mp4"
-    aligned_p = ALIGNED / f"{eid}.parquet"
-    if video is not None:
-        try:
-            step("hands (MediaPipe)")
-            from hands import run_hands
-            run_hands(str(video), str(hands_p), str(overlay), swap_handedness=True)
-        except Exception as e:
-            print("hands failed:", e, flush=True)
-        try:
-            step("clap sync")
-            from sync import run_sync
-            sync = run_sync(str(video), str(raw_p), str(hands_p) if hands_p.exists() else None, str(aligned_p),
-                            plot=str(ALIGNED / f"{eid}_sync.png"), search_window=12.0, task=task)
-        except Exception as e:
-            print("sync failed:", e, flush=True)
-    if not aligned_p.exists() or sync is None:
-        step("no video / sync: IMU-only aligned episode")
-        al = lab.copy()
-        al["t_s"] = al["t_rel_s"]
-        al["t_imu_s"] = al["t_rel_s"]
-        al = al.iloc[::3].reset_index(drop=True)  # 100 Hz -> ~33 Hz rows like video frames
-        al.to_parquet(aligned_p, index=False)
-        (ALIGNED / f"{eid}.sync.json").write_text(json.dumps({"offset_s": 0.0, "task": task, "imu_only": True}))
-        sync = {"offset_s": 0.0, "imu_only": True}
-    offset = float(sync.get("offset_s", 0.0) or 0.0)
-
-    step("sim twin (MuJoCo)")
-    twin = None
-    try:
-        twin = sim_twin(eid, aligned_p, task)
-    except Exception as e:
-        print("twin failed:", e, flush=True)
-
-    # ---- publish per-episode JSON for the Episode screen ----
-    t_imu = lab["t_rel_s"].to_numpy(float)
-    amag = lab["accel_mag"].to_numpy(float)
-    if video is not None and not sync.get("imu_only"):
-        vdur = video_duration(video)
-    else:
-        vdur = float(t_imu[-1])
-    tv = np.arange(0, vdur, 0.01)
-    imu = np.interp(tv + offset, t_imu, amag, left=0, right=0)
-    tc = sync.get("t_clap_imu_s")  # the 3 sync claps are not task contacts
-    clap = (lambda t: tc - 0.3 <= t <= tc + 2.6) if tc is not None and not sync.get("imu_only") else (lambda t: False)
-    contacts = [{"kind": UI_KIND.get(e["event"], "TAP"), "t": round(e["t_s"] - offset, 3), "event": e["event"]}
-                for e in events if 0 <= e["t_s"] - offset <= vdur and not clap(e["t_s"])]
-    gripper, state, t_last = [], "open", 0.0
-    for c in contacts:
-        new = "closed" if c["event"] == "grab_onset" else "open" if c["event"] in ("set_down", "slip_or_scrape") else state
-        if new != state:
-            gripper.append({"t0": t_last, "t1": c["t"], "state": state})
-            state, t_last = new, c["t"]
-    gripper.append({"t0": t_last, "t1": vdur, "state": state})
-    pub = {"id": eid, "task": task.replace("_", " "), "duration": round(vdur, 2), "fps": 30,
-           "frames": int(round(vdur * 30)), "sync_offset_ms": int(round(offset * 1000)) if not sync.get("imu_only") else 0,
-           "contacts": contacts, "gripper": gripper, "imu": [round(float(x), 3) for x in imu], "imu_hz": 100}
-    if overlay.exists():
-        shutil.copy(overlay, PUB / f"ep_{eid}_overlay.mp4")
-        shutil.copy(overlay, PUB / "episode_overlay.mp4")
-        pub["overlay"] = f"/files/ep_{eid}_overlay.mp4?v={int(time.time())}"
-    elif video is not None:
-        h264(video, PUB / f"ep_{eid}_overlay.mp4")
-        pub["overlay"] = f"/files/ep_{eid}_overlay.mp4?v={int(time.time())}"
-    if twin:
-        shutil.copy(twin, PUB / f"ep_{eid}_twin.mp4")
-        shutil.copy(twin, PUB / "sim_twin.mp4")
-        pub["twin"] = f"/files/ep_{eid}_twin.mp4?v={int(time.time())}"
-    (PUB / f"ep_{eid}.json").write_text(json.dumps(pub))
-    publish_index()
-    step(f"done: {len(contacts)} contacts, offset {offset * 1000:+.0f} ms")
-    return pub
+    return process_video_only(eid)
 
 
 def video_duration(p: Path) -> float:
@@ -325,32 +238,9 @@ def publish_index() -> None:
 
 # --------------------------------------------------------------------------- multiply
 def multiply(eid: str, n: int, render_n: int, seed: int = 42) -> None:
-    from sim.augment import run_augment
-    if not (RAW / f"{eid}.parquet").exists() and (HANDS / f"{eid}_hands.parquet").exists() and find_video(eid):
-        return multiply_video(eid, n, render_n, seed)
-    src = ALIGNED / f"{eid}.parquet"
-    if not src.exists():
-        src = RAW / f"{eid}.parquet"
-    if not src.exists():
-        eps = raw_episodes()
-        if not eps:
-            raise SystemExit("no episodes recorded yet")
-        eid = eps[-1]
-        src = ALIGNED / f"{eid}.parquet" if (ALIGNED / f"{eid}.parquet").exists() else RAW / f"{eid}.parquet"
-    task = episode_meta(eid).get("task") or "pick_place_mug"
-    for sub in ("episodes", "videos"):
-        if (SIM / sub).exists():
-            shutil.rmtree(SIM / sub)
-    step(f"multiply {src.name} x{n}")
-    print(f'PROGRESS {{"done": 0, "total": {n}, "ok": 0, "slip": 0}}', flush=True)
-    run_augment(str(src), n=n, render_n=render_n, out_dir=str(SIM), lerobot_out=None, task=task, seed=seed)
-    publish_variants()
-    publish_index()
-    step("metrics")
-    try:
-        metrics()
-    except Exception as e:
-        print("metrics failed:", e, flush=True)
+    if not ((HANDS / f"{eid}_hands.parquet").exists() and find_video(eid)):
+        raise SystemExit(f"{eid}: process the video first (python jobs.py process {eid})")
+    multiply_video(eid, n, render_n, seed)
 
 
 def multiply_video(eid: str, n: int, render_n: int, seed: int = 42) -> None:
@@ -390,119 +280,6 @@ def publish_variants() -> None:
 
 
 # --------------------------------------------------------------------------- metrics
-def metrics() -> dict:
-    reals = [str(RAW / f"{e}.parquet") for e in raw_episodes()]
-    rep_p = SIM / "sim_to_real_report.json"
-    if reals and (SIM / "episodes").exists():
-        step(f"sim-to-real on {len(reals)} real episodes")
-        subprocess.run([sys.executable, "-m", "sim.sim_to_real", "--sim-dir", str(SIM / "episodes"),
-                        "--real", *reals, "--out-json", str(rep_p)], cwd=ROOT, check=True)
-    rep = json.loads(rep_p.read_text()) if rep_p.exists() else {}
-    bal = rep.get("zero_shot_balanced_accuracy")
-    auc = rep.get("zero_shot_roc_auc")
-    bars = {"baseline": 50, "sim": round(100 * bal) if bal is not None else 0}
-    try:
-        bars.update(extra_bars(reals))
-    except Exception as e:
-        print("extra bars failed:", e, flush=True)
-    sr_auc = bars.pop("simreal_auc", None)
-    bars.pop("real_auc", None)
-    hero = {"acc": round(100 * bal) if bal is not None else 0, "auc": round(auc, 2) if auc is not None else 0,
-            "hero_label": "Trained on simulation only"}
-    if sr_auc is not None and sr_auc > (auc or 0):  # sim + real, scored on held-out real takes
-        hero = {"acc": bars["simreal"], "auc": round(sr_auc, 2), "hero_label": "Trained on simulation + real (held-out takes)"}
-    m = {**hero, "sim_only_acc": round(100 * bal) if bal is not None else 0,
-         "sim_only_auc": round(auc, 2) if auc is not None else 0,
-         "acc_metric": "balanced_accuracy", "bars": bars, "n_real": len(reals),
-         "n_sim": rep.get("n_sim_episodes"),
-         "synthetic": all("synth" in Path(r).stem for r in reals)}
-    m.update(drift_data(reals))
-    (PUB / "metrics.json").write_text(json.dumps(m, indent=2))
-    publish_index()
-    print(json.dumps({k: v for k, v in m.items() if k != "drift"}), flush=True)
-    return m
-
-
-def extra_bars(reals: list[str]) -> dict:
-    """Real-only (leave-one-episode-out on real) and sim+real, as balanced accuracy %."""
-    import sim.sim_to_real as s2r
-    from sklearn.ensemble import RandomForestClassifier
-    from sklearn.metrics import balanced_accuracy_score
-    if len(reals) < 2:
-        return {"real": 0, "simreal": 0}
-
-    def windows(p, sim):
-        df = s2r.to_100hz(s2r.read_any(p))
-        X, st = s2r.window_features(df)
-        X = s2r.episode_norm(X)
-        flag = s2r.sim_sample_labels(df) if sim else s2r.real_sample_labels(df)
-        return X, s2r.window_labels(flag, st)
-    real = [windows(p, False) for p in reals]
-    sims = [windows(str(p), True) for p in sorted((SIM / "episodes").glob("sim_v*.parquet"))
-            if not p.stem.endswith("_30fps")]
-    Xs = np.vstack([x for x, _ in sims]) if sims else np.zeros((0, real[0][0].shape[1]))
-    ys = np.concatenate([y for _, y in sims]) if sims else np.zeros(0)
-    r_only, both, P_r, P_b, Y = [], [], [], [], []
-    for k in range(len(real)):
-        Xt, yt = real[k]
-        if len(np.unique(yt)) < 2:
-            continue
-        Xr = np.vstack([real[i][0] for i in range(len(real)) if i != k])
-        yr = np.concatenate([real[i][1] for i in range(len(real)) if i != k])
-        Y.append(yt)
-        for X, y, acc, P in ((Xr, yr, r_only, P_r), (np.vstack([Xs, Xr]), np.concatenate([ys, yr]), both, P_b)):
-            clf = s2r.make_model().fit(X, y)
-            p = clf.predict_proba(Xt)[:, list(clf.classes_).index(1)]
-            P.append(p)
-            acc.append(balanced_accuracy_score(yt, s2r.threshold_by_rate(p, float(y.mean()))))
-    from sklearn.metrics import roc_auc_score
-    out = {"real": round(100 * np.mean(r_only)) if r_only else 0, "simreal": round(100 * np.mean(both)) if both else 0}
-    if Y:
-        Yc = np.concatenate(Y)
-        out["real_auc"] = round(float(roc_auc_score(Yc, np.concatenate(P_r))), 3)
-        out["simreal_auc"] = round(float(roc_auc_score(Yc, np.concatenate(P_b))), 3)
-    return out
-
-
-def drift_data(reals: list[str]) -> dict:
-    """Ship screen: camera wrist path vs naive IMU double integration, top-down, normalized to 0..1."""
-    if not reals:
-        return {}
-    eid = Path(max(reals, key=lambda p: pd.read_parquet(p, columns=["t_rel_s"])["t_rel_s"].iloc[-1])).stem
-    df = pd.read_parquet(RAW / f"{eid}.parquet")
-    df = df[df["t_rel_s"] <= 10.0]
-    try:
-        from live_viz import drift_path
-        t, xyz = drift_path(df)
-    except Exception:
-        t = df["t_rel_s"].to_numpy()
-        a = df[["ax", "ay", "az"]].to_numpy() - df[["ax", "ay", "az"]].iloc[:50].mean().to_numpy()
-        dt = np.gradient(t)
-        xyz = np.cumsum(np.cumsum(a * dt[:, None], 0) * dt[:, None], 0)
-    imu_m = np.asarray(xyz)[:, :2]
-    cam_m = np.zeros_like(imu_m)
-    hp = HANDS / f"{eid}_hands.parquet"
-    al = ALIGNED / f"{eid}.parquet"
-    if hp.exists() and al.exists():
-        h = pd.read_parquet(hp)
-        side = "right" if h.get("right_present", pd.Series([0])).sum() >= h.get("left_present", pd.Series([0])).sum() else "left"
-        ok = h[f"{side}_present"] > 0
-        if ok.sum() > 10:
-            off = json.loads((ALIGNED / f"{eid}.sync.json").read_text()).get("offset_s", 0.0)
-            tv = h.loc[ok, "t_s"].to_numpy() + off
-            for i, c in enumerate(("x0", "y0")):
-                v = h.loc[ok, f"{side}_{c}"].to_numpy() * 0.6  # ~60 cm field of view on the table
-                cam_m[:, i] = np.interp(t, tv, v - v[0])
-    end_err = float(np.linalg.norm(imu_m[-1] - cam_m[-1]))
-    allp = np.vstack([imu_m, cam_m])
-    lo, span = allp.min(0), max(float((allp.max(0) - allp.min(0)).max()), 1e-3)
-    norm = lambda P: [[round(float(.05 + .9 * (x - lo[0]) / span), 4), round(float(.05 + .9 * (y - lo[1]) / span), 4)]
-                      for x, y in P[:: max(1, len(P) // 100)]]
-    return {"drift_m": round(end_err, 2), "drift": {"cam": norm(cam_m), "imu": norm(imu_m), "episode": eid,
-                                                    "seconds": round(float(t[-1] - t[0]), 1)}}
-
-
-# --------------------------------------------------------------------------- export
 def export() -> dict:
     from export import export_lerobot_dataset
     out = {}
@@ -536,7 +313,7 @@ def export() -> dict:
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("job", choices=["process", "process_all", "multiply", "metrics", "export", "index"])
+    ap.add_argument("job", choices=["process", "process_all", "multiply", "export", "index"])
     ap.add_argument("episode", nargs="?")
     ap.add_argument("--n", type=int, default=100)
     ap.add_argument("--render-n", type=int, default=9)
@@ -553,8 +330,6 @@ def main():
                 print(f"{eid} failed: {e}", flush=True)
     elif a.job == "multiply":
         multiply(a.episode or "latest", a.n, a.render_n)
-    elif a.job == "metrics":
-        metrics()
     elif a.job == "export":
         export()
     elif a.job == "index":

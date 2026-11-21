@@ -54,7 +54,6 @@ From one 49-second take (`ep_173510`):
 | Robot copy | grasps and lifts the cup 12 cm, in time with the video |
 | 10 simulated variants | 7 OK, 3 SLIP (low friction or heavy objects) |
 
-An earlier version used a second phone on the wrist as a motion sensor. That code is still in the repo (`receiver.py`, `contact_detect.py`, `sync.py`, `sim/sim_to_real.py`).
 
 ## Limits
 
@@ -63,7 +62,6 @@ An earlier version used a second phone on the wrist as a motion sensor. That cod
 - Hand tracking drops when the hand is side-on or covered.
 - The robot hand is a two-jaw gripper, and slipping uses a simple grip-force model.
 
-More detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/SIMULATION.md](docs/SIMULATION.md), [docs/DATASET.md](docs/DATASET.md).
 
 ## License
 
