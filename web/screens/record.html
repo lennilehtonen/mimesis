@@ -263,9 +263,9 @@
   }, 1000);
   async function loadHands() {
     try {
-      const { FilesetResolver, HandLandmarker } = await import('/vendor/mediapipe/vision_bundle.mjs');
-      const fs = await FilesetResolver.forVisionTasks('/vendor/mediapipe/wasm');
-      landmarker = await HandLandmarker.createFromOptions(fs, { baseOptions: { modelAssetPath: '/vendor/mediapipe/hand_landmarker.task', delegate: 'GPU' }, runningMode: 'VIDEO', numHands: 2 });
+      const { FilesetResolver, HandLandmarker } = await import('./vendor/mediapipe/vision_bundle.mjs');
+      const fs = await FilesetResolver.forVisionTasks('./vendor/mediapipe/wasm');
+      landmarker = await HandLandmarker.createFromOptions(fs, { baseOptions: { modelAssetPath: './vendor/mediapipe/hand_landmarker.task', delegate: 'GPU' }, runningMode: 'VIDEO', numHands: 2 });
     } catch (e) { console.warn('mediapipe js failed, skeleton comes from hands.py overlay MP4 after processing', e); }
   }
   if (!window.MIMESIS_DEMO) startCam();

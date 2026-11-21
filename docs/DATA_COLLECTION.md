@@ -1,5 +1,7 @@
 # Data collection
 
+> **Wrist-IMU prototype.** This document describes the earlier two-phone setup (chest camera plus a wrist phone running Sensor Logger). The current video-only pipeline needs one phone, a stand and an A4 sheet; see "How to film a take" in the [README](../README.md).
+
 How to record demonstrations that MIMESIS can actually sync, retarget, and multiply. No native iOS app is required.
 
 ## 1. Kit

@@ -351,9 +351,9 @@ window.M = (() => {
   }, 1000);
   async function loadHands() {
     try {
-      const { FilesetResolver, HandLandmarker } = await import('/vendor/mediapipe/vision_bundle.mjs');
-      const fs = await FilesetResolver.forVisionTasks('/vendor/mediapipe/wasm');
-      landmarker = await HandLandmarker.createFromOptions(fs, { baseOptions: { modelAssetPath: '/vendor/mediapipe/hand_landmarker.task', delegate: 'GPU' }, runningMode: 'VIDEO', numHands: 2 });
+      const { FilesetResolver, HandLandmarker } = await import('./vendor/mediapipe/vision_bundle.mjs');
+      const fs = await FilesetResolver.forVisionTasks('./vendor/mediapipe/wasm');
+      landmarker = await HandLandmarker.createFromOptions(fs, { baseOptions: { modelAssetPath: './vendor/mediapipe/hand_landmarker.task', delegate: 'GPU' }, runningMode: 'VIDEO', numHands: 2 });
     } catch (e) { console.warn('mediapipe js failed, skeleton comes from hands.py overlay MP4 after processing', e); }
   }
   if (!window.MIMESIS_DEMO) startCam();
@@ -786,12 +786,12 @@ window.M = (() => {
   // live: real episodes from GET /files/dataset_stats.json -> episodes:[{n, task, duration}]
   (async () => {
     if (!window.MIMESIS_DEMO) try {
-      const st = await (await fetch('/files/dataset_stats.json?' + Date.now())).json();
+      const st = await (await fetch((M.api || '') + '/files/dataset_stats.json?' + Date.now())).json();
       if (st.episodes && st.episodes.length) EPS = st.episodes.map(e => ({ n: e.n, task: e.task + ' · ' + e.id, dur: e.duration }));
     } catch (e) {}
     buildRail(); select(EPS.length - 1);
   })();
-  M.on('screen', id => { if (id === 'episode' && !window.MIMESIS_DEMO) fetch('/files/dataset_stats.json?' + Date.now()).then(r => r.json()).then(st => {
+  M.on('screen', id => { if (id === 'episode' && !window.MIMESIS_DEMO) fetch((M.api || '') + '/files/dataset_stats.json?' + Date.now()).then(r => r.json()).then(st => {
     if (st.episodes && st.episodes.length !== EPS.length) { EPS = st.episodes.map(e => ({ n: e.n, task: e.task + ' · ' + e.id, dur: e.duration })); buildRail(); select(EPS.length - 1); } }).catch(() => {}); });
   requestAnimationFrame(frame);
 })();
@@ -1134,7 +1134,7 @@ window.M = (() => {
   let liveJob = null, liveStart = 0;
   M.on('jobs', js => { if (liveJob && js.multiply && performance.now() - liveStart > 1500) liveJob = js.multiply; });
   function reloadLabels() {
-    return fetch('/files/variants/labels.json?' + Date.now()).then(r => r.ok ? r.json() : null).then(j => { if (Array.isArray(j) && j.length) { labels = j; videoOK = true; labelsVer = Date.now(); } }).catch(() => {});
+    return fetch((M.api || '') + '/files/variants/labels.json?' + Date.now()).then(r => r.ok ? r.json() : null).then(j => { if (Array.isArray(j) && j.length) { labels = j; videoOK = true; labelsVer = Date.now(); } }).catch(() => {});
   }
   $('mx-gen').addEventListener('click', generate);
   addEventListener('keydown', e => { if (e.target.closest('input,select,textarea,button')) return; if (e.key === 'g' || e.key === 'Enter') { if (root.classList.contains('on')) generate(); } });
@@ -1173,7 +1173,7 @@ window.M = (() => {
   }
   buildGrid(true); paintSlider(); setState('done'); drawDonut(N); status();
   // live: show the last real run (dataset_stats.json) instead of the demo 10
-  if (!window.MIMESIS_DEMO) fetch('/files/dataset_stats.json?' + Date.now()).then(r => r.json()).then(st => {
+  if (!window.MIMESIS_DEMO) fetch((M.api || '') + '/files/dataset_stats.json?' + Date.now()).then(r => r.json()).then(st => {
     if (!st.episodes_sim) return; thumbs.forEach(t => t.v = null); for (let i = 9; i >= 0; i--) pushThumb(i);
     N = genCount = st.episodes_sim; lastLive = { state: 'done', progress: { done: N, total: N, ok: st.sim_ok, slip: st.sim_slip } };
     slider.value = Math.min(1000, N); paintSlider(); setNum(N); setState('done'); drawDonut(N); status();
@@ -1555,8 +1555,11 @@ M.on('status', s => {
 /* ---------- LIVE data source: WebSocket /ws, polling /latest + /status as fallback. ----------
    Served by receiver.py (http:) -> live. Opened as a file or with ?demo -> synthetic DEMO block below. */
 window.MIMESIS_DEMO = location.protocol === 'file:' || /[?&]demo\b/.test(location.search);
+/* static host (GitHub Pages): recorded results from ./files, no server, no live phone stream */
+window.MIMESIS_STATIC = /github\.io$/.test(location.hostname) || /[?&]static\b/.test(location.search);
+if (MIMESIS_STATIC) M.api = '.';
 M.camera = false;
-if (!MIMESIS_DEMO) addEventListener('DOMContentLoaded', () => {
+if (!MIMESIS_DEMO && !MIMESIS_STATIC) addEventListener('DOMContentLoaded', () => {
   let ws = null, polling = null, lastStatus = { wrist: false, hz: 0, episodes: 0 }, lastT = -1;
   const emitImu = s => {
     if (s.t <= lastT) return; lastT = s.t;

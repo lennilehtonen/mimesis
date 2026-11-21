@@ -1,5 +1,7 @@
 # Receiver API
 
+> **Note.** The Sensor Logger ingest parts of this document (`/data`, `/episode/start`, `/episode/stop`, `--import-csv-dir`, payload format) belong to the earlier wrist-IMU prototype. The current video-only pipeline uses the dashboard at http://localhost:8000 and `jobs.py`; see the [README](../README.md).
+
 `receiver.py` is a FastAPI app that ingests **Sensor Logger** (Kelvin Choi) HTTP Push batches, keeps a live ring buffer for `live_viz.py`, and writes per-episode parquet/CSV.
 
 ## Process

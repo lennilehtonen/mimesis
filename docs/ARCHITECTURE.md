@@ -1,5 +1,7 @@
 # Architecture
 
+> **Current pipeline (video-only).** MIMESIS now uses one iPhone as a fixed camera and no wrist IMU. `hands.py` gives 21 MediaPipe landmarks, `sim/hand3d.py` lifts them to a metric 3D hand (solvePnP with iPhone intrinsics, A4 sheet via IPPE for the table frame), `sim/cup_track.py` finds the cup and places it on the table, and `sim/retarget.py` `retarget_exact` makes the gripper copy the hand 1:1 in time. `jobs.py` (`process_video_only`, `multiply_video`) runs it. Sections below that mention Phone B, Sensor Logger, clap sync or IMU describe the earlier wrist-IMU prototype.
+
 This document describes how a two-phone demonstration becomes a LeRobot-style dataset and a MuJoCo-multiplied sibling corpus. Implementation lives in the Python modules named below; commands and flags are listed in the root [README](../README.md).
 
 ## 1. Pipeline stages

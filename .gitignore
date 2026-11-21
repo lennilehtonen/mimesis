@@ -7,3 +7,4 @@ data/
 models/
 *.task
 !web/vendor/mediapipe/hand_landmarker.task
+site/

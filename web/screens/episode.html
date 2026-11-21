@@ -394,12 +394,12 @@
   // live: real episodes from GET /files/dataset_stats.json -> episodes:[{n, task, duration}]
   (async () => {
     if (!window.MIMESIS_DEMO) try {
-      const st = await (await fetch('/files/dataset_stats.json?' + Date.now())).json();
+      const st = await (await fetch((M.api || '') + '/files/dataset_stats.json?' + Date.now())).json();
       if (st.episodes && st.episodes.length) EPS = st.episodes.map(e => ({ n: e.n, task: e.task + ' · ' + e.id, dur: e.duration }));
     } catch (e) {}
     buildRail(); select(EPS.length - 1);
   })();
-  M.on('screen', id => { if (id === 'episode' && !window.MIMESIS_DEMO) fetch('/files/dataset_stats.json?' + Date.now()).then(r => r.json()).then(st => {
+  M.on('screen', id => { if (id === 'episode' && !window.MIMESIS_DEMO) fetch((M.api || '') + '/files/dataset_stats.json?' + Date.now()).then(r => r.json()).then(st => {
     if (st.episodes && st.episodes.length !== EPS.length) { EPS = st.episodes.map(e => ({ n: e.n, task: e.task + ' · ' + e.id, dur: e.duration })); buildRail(); select(EPS.length - 1); } }).catch(() => {}); });
   requestAnimationFrame(frame);
 })();

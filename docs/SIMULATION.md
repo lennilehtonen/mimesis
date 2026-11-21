@@ -1,5 +1,7 @@
 # Simulation
 
+> **Current pipeline (video-only).** MIMESIS now uses one iPhone as a fixed camera and no wrist IMU. `hands.py` gives 21 MediaPipe landmarks, `sim/hand3d.py` lifts them to a metric 3D hand (solvePnP with iPhone intrinsics, A4 sheet via IPPE for the table frame), `sim/cup_track.py` finds the cup and places it on the table, and `sim/retarget.py` `retarget_exact` makes the gripper copy the hand 1:1 in time. `jobs.py` (`process_video_only`, `multiply_video`) runs it. Sections below on IMU sites, IMU noise and sim-to-real describe the earlier wrist-IMU prototype.
+
 MIMESIS retargets one real (or IMU-only) demonstration into MuJoCo and multiplies it. All simulation code is under `sim/`. Rendering uses `mujoco.Renderer` on the main thread. On headless Linux, `sim.scene.configure_gl_backend()` sets `MUJOCO_GL=egl` when `DISPLAY` is unset; on macOS the default backend is left alone.
 
 ## 1. Scene (`sim/scene.py`)

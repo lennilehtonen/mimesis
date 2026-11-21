@@ -335,7 +335,7 @@
   let liveJob = null, liveStart = 0;
   M.on('jobs', js => { if (liveJob && js.multiply && performance.now() - liveStart > 1500) liveJob = js.multiply; });
   function reloadLabels() {
-    return fetch('/files/variants/labels.json?' + Date.now()).then(r => r.ok ? r.json() : null).then(j => { if (Array.isArray(j) && j.length) { labels = j; videoOK = true; labelsVer = Date.now(); } }).catch(() => {});
+    return fetch((M.api || '') + '/files/variants/labels.json?' + Date.now()).then(r => r.ok ? r.json() : null).then(j => { if (Array.isArray(j) && j.length) { labels = j; videoOK = true; labelsVer = Date.now(); } }).catch(() => {});
   }
   $('mx-gen').addEventListener('click', generate);
   addEventListener('keydown', e => { if (e.target.closest('input,select,textarea,button')) return; if (e.key === 'g' || e.key === 'Enter') { if (root.classList.contains('on')) generate(); } });
@@ -374,7 +374,7 @@
   }
   buildGrid(true); paintSlider(); setState('done'); drawDonut(N); status();
   // live: show the last real run (dataset_stats.json) instead of the demo 10
-  if (!window.MIMESIS_DEMO) fetch('/files/dataset_stats.json?' + Date.now()).then(r => r.json()).then(st => {
+  if (!window.MIMESIS_DEMO) fetch((M.api || '') + '/files/dataset_stats.json?' + Date.now()).then(r => r.json()).then(st => {
     if (!st.episodes_sim) return; thumbs.forEach(t => t.v = null); for (let i = 9; i >= 0; i--) pushThumb(i);
     N = genCount = st.episodes_sim; lastLive = { state: 'done', progress: { done: N, total: N, ok: st.sim_ok, slip: st.sim_slip } };
     slider.value = Math.min(1000, N); paintSlider(); setNum(N); setState('done'); drawDonut(N); status();

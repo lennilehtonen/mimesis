@@ -1,5 +1,7 @@
 # Pitch script and Q&A
 
+> **Note.** This pitch describes the earlier wrist-IMU prototype, not the current video-only pipeline.
+
 Five minutes, plus unlimited Q&A as announced at NullHacks Helsinki. Judging: (i) coolness, (ii) technical complexity (a real build, not a mock), (iii) creativity. The theme asks you to **simulate** data, not only collect it.
 
 Fill italic placeholders with numbers from **your** `manifest.json` and `sim_to_real_report.json`. If you mention the box regression test, say **synthetic** out loud: clap-sync error **10 ms**, ROC-AUC **0.81** on a **synthetic-real** clip — not a human held-out set.
