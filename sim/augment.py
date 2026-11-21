@@ -176,6 +176,8 @@ def simulate_variant(rt: pd.DataFrame, params: dict, render: bool = False, video
     att = {"on": False, "rel_p": None, "rel_q": None, "ever": False, "dropped": False, "blocked": False,
            "prev_p": None, "prev_v": np.zeros(3), "acc": 0.0}
 
+    from sim.scene import FINGER_X0
+    q_hold = float(np.clip(FINGER_X0 - 0.036 * float(params["obj_scale"]) * 1.06 - 0.0005, -0.005, 0.042))
     CX = rt["cup_x"].to_numpy(float) if "cup_x" in rt else None
     CY = rt["cup_y"].to_numpy(float) if "cup_y" in rt else None
 
@@ -239,6 +241,8 @@ def simulate_variant(rt: pd.DataFrame, params: dict, render: bool = False, video
                 tt = step * PHYS_DT
                 p, q, g = traj(tt)
                 d.mocap_pos[mocap_id], d.mocap_quat[mocap_id] = p, q
+                if exact and att["on"]:  # holding: jaws rest on the cup surface (no clipping into it)
+                    g = q_hold
                 d.ctrl[:] = g
                 mujoco.mj_step(m, d)
                 hold_update(tt)

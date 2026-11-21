@@ -91,24 +91,21 @@ def build_scene_xml(obj_type: str = "cup", mass: float = 0.25, friction: float =
       <freejoint name="wrist_free"/>
       <inertial pos="0 0 0.02" mass="0.35" diaginertia="0.0006 0.0006 0.0004"/>
       <site name="imu_site" pos="0 0 0.02" size="0.006" rgba="0 1 0 1"/>
-      <geom name="palm" type="ellipsoid" size="0.075 0.048 0.022" pos="0 0 0.05" mass="0.0" rgba="0.92 0.74 0.62 1"/>
-      <geom name="knuckles" type="capsule" fromto="0.03 -0.036 0.035 0.03 0.036 0.035" size="0.013" contype="0" conaffinity="0" mass="0.0" rgba="0.92 0.74 0.62 1"/>
+      <geom name="palm" type="box" size="0.072 0.038 0.016" pos="0 0 0.05" mass="0.0" rgba="0.20 0.22 0.25 1"/>
+      <geom name="wrist_cap" type="cylinder" size="0.026 0.02" pos="0 0 0.085" contype="0" conaffinity="0" mass="0.0" rgba="0.14 0.15 0.17 1"/>
+      <geom name="accent" type="box" size="0.073 0.039 0.002" pos="0 0 0.066" contype="0" conaffinity="0" mass="0.0" rgba="0.24 0.90 1.0 1"/>
       <geom name="phone" type="box" size="0.035 0.07 0.004" pos="0 0 0.062" contype="0" conaffinity="0" mass="0.0" rgba="0 0 0 0"/>
       <body name="finger_l" pos="0 0 0">
         <joint name="grip_l" type="slide" axis="1 0 0" range="-0.005 0.042" damping="4"/>
-        <geom name="pad_l" type="box" size="0.008 0.016 0.05" pos="{-(fx + 0.006):.4f} 0 -0.015" mass="0.03"
-              friction="1.4 0.02 0.002" condim="4" rgba="0 0 0 0"/>
-        <geom name="thumb" type="capsule" fromto="{-(fx + 0.008):.4f} 0 0.04 {-(fx + 0.008):.4f} 0 -0.05" size="0.012"
-              contype="0" conaffinity="0" mass="0.0" rgba="0.92 0.74 0.62 1"/>
+        <geom name="pad_l" type="box" size="0.008 0.022 0.05" pos="{-(fx + 0.006):.4f} 0 -0.015" mass="0.03"
+              friction="1.4 0.02 0.002" condim="4" rgba="0.30 0.32 0.36 1"/>
+        <geom name="tip_l" type="box" size="0.0015 0.02 0.02" pos="{-(fx - 0.0015):.4f} 0 -0.04" contype="0" conaffinity="0" mass="0.0" rgba="0.24 0.90 1.0 1"/>
       </body>
       <body name="finger_r" pos="0 0 0">
         <joint name="grip_r" type="slide" axis="-1 0 0" range="-0.005 0.042" damping="4"/>
-        <geom name="pad_r" type="box" size="0.008 0.034 0.05" pos="{fx + 0.006:.4f} 0 -0.015" mass="0.03"
-              friction="1.4 0.02 0.002" condim="4" rgba="0 0 0 0"/>
-        <geom name="f_index" type="capsule" fromto="{fx + 0.008:.4f} -0.027 0.035 {fx + 0.008:.4f} -0.027 -0.062" size="0.0095" contype="0" conaffinity="0" mass="0.0" rgba="0.92 0.74 0.62 1"/>
-        <geom name="f_middle" type="capsule" fromto="{fx + 0.008:.4f} -0.009 0.035 {fx + 0.008:.4f} -0.009 -0.07" size="0.0098" contype="0" conaffinity="0" mass="0.0" rgba="0.92 0.74 0.62 1"/>
-        <geom name="f_ring" type="capsule" fromto="{fx + 0.008:.4f} 0.009 0.035 {fx + 0.008:.4f} 0.009 -0.065" size="0.0094" contype="0" conaffinity="0" mass="0.0" rgba="0.92 0.74 0.62 1"/>
-        <geom name="f_pinky" type="capsule" fromto="{fx + 0.008:.4f} 0.027 0.035 {fx + 0.008:.4f} 0.027 -0.052" size="0.0085" contype="0" conaffinity="0" mass="0.0" rgba="0.92 0.74 0.62 1"/>
+        <geom name="pad_r" type="box" size="0.008 0.022 0.05" pos="{fx + 0.006:.4f} 0 -0.015" mass="0.03"
+              friction="1.4 0.02 0.002" condim="4" rgba="0.30 0.32 0.36 1"/>
+        <geom name="tip_r" type="box" size="0.0015 0.02 0.02" pos="{fx - 0.0015:.4f} 0 -0.04" contype="0" conaffinity="0" mass="0.0" rgba="0.24 0.90 1.0 1"/>
       </body>
     </body>
   </worldbody>
