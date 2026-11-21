@@ -4,6 +4,8 @@
 
 > **Film one real grab with your phone. Simulate a thousand.**
 
+![Real take with hand tracking, MuJoCo twin, and a 3x3 grid of simulated variants (green OK, red SLIP)](docs/demo.png)
+
 MIMESIS turns one short phone video of a human hand picking up a cup into a physics-labelled robot dataset. One iPhone films the table (Continuity Camera into Chrome). There is no wrist IMU and no other sensor. A Mac tracks the hand with MediaPipe, lifts it to a metric 3D hand using an A4 sheet on the table as calibration, finds the cup, and makes a robot gripper in MuJoCo copy the human hand 1:1 in time. It then replays that motion across many physically varied worlds (cup or box, mass, friction, size, position) and labels each variant OK or SLIP from the physics. The result is exported as a LeRobot v3 dataset.
 
 The name comes from the Ancient Greek *mimesis*, imitation.
@@ -201,9 +203,6 @@ memesis/
     ARCHITECTURE.md
     SIMULATION.md
     DATASET.md
-    DATA_COLLECTION.md     # wrist-IMU prototype
-    API.md                 # receiver API (Sensor Logger parts are wrist-IMU prototype)
-    PITCH.md               # wrist-IMU prototype pitch
 ```
 
 Runtime data is written under `data/` and is not shipped in the repository.
