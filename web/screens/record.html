@@ -139,13 +139,15 @@
   });
   M.on('contact', d => { evs.push({ t: d.t, kind: d.kind, wall: performance.now() }); if (evs.length > 40) evs.shift(); nev++; $('rc-nev').textContent = nev;
     const l = $('rc-last'); l.textContent = d.kind; l.style.color = C.ev[d.kind] || C.text; });
-  M.on('hand', d => { hand = d.joints; });
+  M.on('hand', d => { hand = d.joints; hands2 = null; });
+  let hands2 = null;   // live MediaPipe result: array of 21-joint hands in canvas-normalized coords
   M.on('status', s => {
     connected = !!s.wrist; root.classList.toggle('disc', !connected);
     $('rc-hz').textContent = s.wrist ? Math.round(s.hz) : '—'; $('rc-neps').textContent = s.episodes;
     $('rc-livetxt').textContent = s.camera ? (recOn ? 'REC' : 'LIVE') : 'NO CAMERA';
   });
   $('rc-ip').textContent = (location.hostname || '<mac-ip>') + ':8000';
+  if (!window.MIMESIS_DEMO) fetch('/config').then(r => r.json()).then(c => { $('rc-ip').textContent = c.sensor_logger_url; }).catch(() => {});
 
   /* ---- plot (Rerun style: grid, ticks, cursor) ---- */
   const pc = $('rc-plot'), px = pc.getContext('2d');
@@ -191,13 +193,29 @@
   const cc = $('rc-cam'), cx = cc.getContext('2d'), CH = [1, 5, 9, 13, 17];
   function drawCam(ts) {
     const W = cc.width, H = cc.height, t = ts / 1000;
-    // WIRE: if video.readyState>=2 -> cx.drawImage(video,0,0,W,H) instead of the placeholder below
+    if (video.readyState >= 2 && video.videoWidth) {
+      const vw = video.videoWidth, vh = video.videoHeight, sc = Math.max(W / vw, H / vh), dw = vw * sc, dh = vh * sc, ox = (W - dw) / 2, oy = (H - dh) / 2;
+      cx.drawImage(video, ox, oy, dw, dh);
+      if (landmarker && ts - lastDet > 30) {
+        lastDet = ts;
+        try {
+          const r = landmarker.detectForVideo(video, ts);
+          hands2 = (r.landmarks || []).map(h => h.map(p => [(ox + p.x * dw) / W, (oy + p.y * dh) / H]));
+        } catch (e) { console.warn('mediapipe', e); landmarker = null; }
+      }
+      (hands2 || []).forEach(drawHand);
+      return;
+    }
     const g = cx.createLinearGradient(0, 0, W, H); g.addColorStop(0, '#171b21'); g.addColorStop(1, '#0d1014'); cx.fillStyle = g; cx.fillRect(0, 0, W, H);
     cx.strokeStyle = 'rgba(255,255,255,.05)'; cx.lineWidth = 1; cx.beginPath(); for (let y = 0; y < H; y += 60) { cx.moveTo(0, y + .5); cx.lineTo(W, y + .5); } cx.stroke();
     cx.fillStyle = 'rgba(255,255,255,.07)'; cx.fillRect(W * .12 + Math.sin(t * .3) * 20, H * .52, 300, 160);   // table
     cx.fillStyle = 'rgba(255,255,255,.12)'; cx.beginPath(); cx.roundRect(W * .66 + Math.sin(t * .7) * 30, H * .46, 90, 120, 10); cx.fill(); // cup
     cx.fillStyle = V('--text-dim'); cx.font = font(18); cx.textAlign = 'right'; cx.textBaseline = 'bottom'; cx.fillText('chest-cam placeholder', W - 16, H - 14);
-    if (hand) {
+    if (hand) drawHand(hand);
+  }
+  function drawHand(hand) {
+    const W = cc.width, H = cc.height;
+    {
       const P = j => [j[0] * W, j[1] * H];
       cx.strokeStyle = C.real; cx.lineWidth = 4; cx.lineCap = 'round'; cx.shadowColor = C.real; cx.shadowBlur = 10; cx.beginPath();
       for (const s of CH) { let p = P(hand[0]); cx.moveTo(p[0], p[1]); for (let k = 0; k < 4; k++) { p = P(hand[s + k]); cx.lineTo(p[0], p[1]); } }
@@ -212,14 +230,54 @@
   let recOn = false, recT0 = 0;
   const btn = $('rc-rec'), txt = $('rc-rectxt'), fmt = s => String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(Math.floor(s % 60)).padStart(2, '0');
   async function post(path, body) {
-    try { await fetch((M.api || '') + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) }); } catch (e) { /* offline demo */ }
+    try { const r = await fetch((M.api || '') + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) }); return await r.json(); } catch (e) { return null; /* offline demo */ }
+  }
+  /* ---- live camera (Continuity Camera via getUserMedia) + MediaPipe Tasks JS + MediaRecorder ---- */
+  const video = $('rc-video'); let landmarker = null, lastDet = 0, stream = null, recorder = null, chunks = [], curEp = null;
+  async function startCam() {
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ video: { width: 1920, height: 1080 }, audio: true });
+      const devs = await navigator.mediaDevices.enumerateDevices();
+      const iph = devs.find(d => d.kind === 'videoinput' && /iphone|continuity/i.test(d.label));
+      const curId = stream.getVideoTracks()[0].getSettings().deviceId;
+      if (iph && iph.deviceId !== curId) {
+        stream.getTracks().forEach(t => t.stop());
+        stream = await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: iph.deviceId }, width: 1920, height: 1080 }, audio: true });
+      }
+      video.srcObject = stream; await video.play(); M.camera = true;
+      const st = stream.getVideoTracks()[0].getSettings(); $('rc-fps').textContent = Math.round(st.frameRate || 30) + ' fps · ' + st.height + 'p';
+    } catch (e) { console.warn('camera', e); M.camera = false; $('rc-fps').textContent = 'no camera'; }
+    try {
+      const { FilesetResolver, HandLandmarker } = await import('/vendor/mediapipe/vision_bundle.mjs');
+      const fs = await FilesetResolver.forVisionTasks('/vendor/mediapipe/wasm');
+      landmarker = await HandLandmarker.createFromOptions(fs, { baseOptions: { modelAssetPath: '/vendor/mediapipe/hand_landmarker.task', delegate: 'GPU' }, runningMode: 'VIDEO', numHands: 2 });
+    } catch (e) { console.warn('mediapipe js failed, skeleton comes from hands.py overlay MP4 after processing', e); }
+  }
+  if (!window.MIMESIS_DEMO) startCam();
+  function startRecorder() {
+    if (!stream || !window.MediaRecorder) return;
+    chunks = []; const mt = ['video/mp4', 'video/webm;codecs=vp9,opus', 'video/webm'].find(t => MediaRecorder.isTypeSupported(t));
+    recorder = new MediaRecorder(stream, mt ? { mimeType: mt, videoBitsPerSecond: 8e6 } : {});
+    recorder.ondataavailable = e => e.data.size && chunks.push(e.data); recorder.start(1000);
+  }
+  function stopRecorder(ep) {
+    if (!recorder) return; const rec = recorder; recorder = null;
+    rec.onstop = async () => {
+      const blob = new Blob(chunks, { type: rec.mimeType }); const fd = new FormData();
+      fd.append('file', blob, ep + (rec.mimeType.includes('mp4') ? '.mp4' : '.webm'));
+      $('rc-livetxt').textContent = 'UPLOADING';
+      try { await fetch('/upload/' + ep, { method: 'POST', body: fd }); $('rc-livetxt').textContent = 'PROCESSING'; await post('/process/' + ep); }
+      catch (e) { console.warn('upload', e); }
+      setTimeout(() => $('rc-livetxt').textContent = 'LIVE', 3000);
+    };
+    rec.stop();
   }
   btn.addEventListener('click', () => {
     recOn = !recOn; root.classList.toggle('recording', recOn);
     if (recOn) { recT0 = performance.now(); txt.textContent = '00:00'; $('rc-livetxt').textContent = 'REC';
-      if (!window.MIMESIS_DEMO) post('/episode/start', { task: $('rc-task').value }); // WIRE: POST /episode/start {task}
+      if (!window.MIMESIS_DEMO) post('/episode/start', { task: $('rc-task').value }).then(r => { curEp = r && r.episode_id; startRecorder(); });
     } else { txt.textContent = 'RECORD'; $('rc-livetxt').textContent = 'LIVE';
-      if (!window.MIMESIS_DEMO) post('/episode/stop'); // WIRE: POST /episode/stop
+      if (!window.MIMESIS_DEMO) { const ep = curEp; post('/episode/stop').then(() => ep && stopRecorder(ep)); }
     }
     M.emit('rec', { on: recOn, t0: recT0 / 1000 });
   });

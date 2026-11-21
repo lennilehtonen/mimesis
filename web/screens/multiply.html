@@ -280,6 +280,8 @@
   const dn = $('mx-donut'), dg = dn.getContext('2d');
   function slipCount(c) {
     if (c <= 0) return 0;
+    const lj = liveJob || lastLive;
+    if (lj && lj.progress && lj.progress.done) return Math.min(c, Math.round(c * lj.progress.slip / lj.progress.done));
     const prog = c / N, jit = 4 * Math.sin(c / 11) * (1 - Math.min(1, prog) * 1);
     return Math.max(0, Math.min(c, Math.round(c * RATE + (state === 'run' ? jit : 0))));
   }
@@ -326,6 +328,14 @@
     seedBase++; N = +slider.value; setState('run'); t0 = performance.now(); cAnim = null; setNum(0); genCount = 0; thumbs.forEach(t => { t.v = null; t.el.classList.remove('full', 'slip'); t.sp.textContent = ''; t.g.clearRect(0, 0, 170, 68); });
     tiles.forEach(t => { t.full = false; t.v = null; t.el.classList.remove('full', 'slip', 'flash'); t.vid.classList.remove('on'); });
     lastThumb = 0; drawDonut(0); status();
+    if (!window.MIMESIS_DEMO) { lastLive = null; liveJob = { state: 'running', progress: { done: 0, total: N, ok: 0, slip: 0 } }; liveStart = performance.now();
+      fetch(`/multiply?n=${N}&render=9`, { method: 'POST' }).then(r => r.json()).then(j => { if (j.state === 'error') liveJob = null; }).catch(() => { liveJob = null; }); }
+  }
+  // live: progress of the backend multiply job (sim/augment.py in a subprocess) arrives over /ws
+  let liveJob = null, liveStart = 0;
+  M.on('jobs', js => { if (liveJob && js.multiply && performance.now() - liveStart > 1500) liveJob = js.multiply; });
+  function reloadLabels() {
+    return fetch('/files/variants/labels.json?' + Date.now()).then(r => r.ok ? r.json() : null).then(j => { if (Array.isArray(j) && j.length) { labels = j; videoOK = true; } }).catch(() => {});
   }
   $('mx-gen').addEventListener('click', generate);
   addEventListener('keydown', e => { if (e.target.closest('input,select,textarea,button')) return; if (e.key === 'g' || e.key === 'Enter') { if (root.classList.contains('on')) generate(); } });
@@ -336,19 +346,27 @@
   });
 
   // ---- main loop ----
-  let lastThumb = 0, lastMs = 0;
+  let lastThumb = 0, lastMs = 0, lastLive = null;
   function tick(now) {
     requestAnimationFrame(tick);
     if (!root.classList.contains('on')) return;
     if (state === 'run') {
-      const el = now - t0, p = Math.min(1, el / GEN_MS);
+      let el = now - t0, p = Math.min(1, el / GEN_MS);
+      if (liveJob) {
+        const pr = liveJob.progress || { done: 0, total: N };
+        p = liveJob.state === 'done' ? 1 : Math.min(.995, pr.done / Math.max(1, pr.total));
+        el = p * GEN_MS;
+        if (liveJob.state === 'error') { liveJob = null; p = 1; }
+        else if (p >= 1) { const lj = liveJob; liveJob = null; reloadLabels().then(() => { tiles.forEach((t, j) => land(t, j, true)); }); lastLive = lj; }
+        setNum(Math.round(N * p));
+      } else
       setNum(Math.round(N * (1 - Math.pow(1 - p, 3))));
       $('mx-genfill').style.width = (p * 100) + '%';
       tiles.forEach((t, j) => { if (!t.full && el >= t.tLand) land(t, j, el - t.tLand > 400); });
       if (now - lastThumb > 140 && counter > 0) { lastThumb = now; pushThumb(Math.max(0, Math.round(counter) - 1)); }
       drawDonut(counter); genCount = counter; status();
-      if (now - lastMs > 180) { lastMs = now; $('mx-ms').textContent = (2.9 + Math.random() * .5).toFixed(1) + ' ms/step'; }
-      if (p >= 1) { setNum(N); genCount = N; setState('done'); $('mx-genfill').style.width = '0'; drawDonut(N); status(); $('mx-ms').textContent = '3.1 ms/step'; }
+      if (now - lastMs > 180) { lastMs = now; $('mx-ms').textContent = window.MIMESIS_DEMO ? (2.9 + Math.random() * .5).toFixed(1) + ' ms/step' : (counter / Math.max(.1, (now - t0) / 1000)).toFixed(1) + ' variants/s'; }
+      if (p >= 1) { setNum(N); genCount = N; setState('done'); $('mx-genfill').style.width = '0'; drawDonut(N); status(); if (window.MIMESIS_DEMO) $('mx-ms').textContent = '3.1 ms/step'; }
     } else if (cAnim) {
       const p = Math.min(1, (now - cAnim.st) / cAnim.dur); setNum(Math.round(cAnim.from + (cAnim.to - cAnim.from) * ease(p))); if (p >= 1) cAnim = null;
     }

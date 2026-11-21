@@ -163,7 +163,7 @@
 
   // ---------- episodes (demo list) ----------
   // WIRE: GET /files/dataset_stats.json -> {episodes:[{n,task,duration}], frames, fps}; per-episode GET /files/episode_<n>.json
-  const EPS = [
+  let EPS = [
     { n: 0, task: 'Pick up the cup', dur: 12 }, { n: 1, task: 'Stack two blocks', dur: 12 },
     { n: 2, task: 'Pour into bowl', dur: 12 }, { n: 3, task: 'Open the drawer', dur: 12 },
     { n: 4, task: 'Hand over the bottle', dur: 12 }, { n: 5, task: 'Wipe the table', dur: 12 }
@@ -187,7 +187,7 @@
       contacts.forEach(c => { const d = tt - c.t; if (d > 0 && d < .5) a += Math.exp(-d * 10) * 7 * Math.sin(d * 70) * (c.kind === 'SLIP' ? 1.3 : 1); });
       imu[i] = a;
     }
-    return { n, task: EPS[n].task, duration: dur, fps: FPS, frames: dur * FPS, sync_offset_ms: [38, 41, 35, 44, 39, 42][n], contacts, gripper, imu, imu_hz: 100 };
+    return { n, task: (EPS[n] || EPS[0]).task, duration: dur, fps: FPS, frames: dur * FPS, sync_offset_ms: [38, 41, 35, 44, 39, 42][n], contacts, gripper, imu, imu_hz: 100 };
   }
 
   async function loadEpisode(n) {
@@ -198,8 +198,8 @@
     if (d) {
       d.imu = Float32Array.from(d.imu || []); d.imu_hz = d.imu_hz || 100; d.fps = d.fps || FPS;
       d.frames = d.frames || Math.round(d.duration * d.fps); d.contacts = d.contacts || []; d.gripper = d.gripper || [];
-      d.task = d.task || EPS[n].task;
-    } else d = demoEpisode(n % EPS.length);
+      d.task = d.task || (EPS[n] || {}).task || 'episode';
+    } else d = demoEpisode(n % 6);
     d.n = n; return d;
   }
 
@@ -214,11 +214,12 @@
     $('ep-m-fr').textContent = d.frames.toLocaleString('en-US'); $('ep-tot').textContent = '/ ' + fmtT(d.duration);
     $('ep-clog').innerHTML = d.contacts.map((c, i) => `<div class="cl" data-i="${i}" style="--c:var(${KIND_VAR[c.kind]})"><b>${c.kind}</b><span>${fmtT(c.t)}</span></div>`).join('');
     // WIRE: per-episode videos; falls back to the canvas placeholder if the file is missing
-    attachVideo('real', '/files/episode_overlay.mp4'); attachVideo('sim', '/files/sim_twin.mp4');
+    attachVideo('real', d.overlay || '/files/episode_overlay.mp4'); attachVideo('sim', d.twin || '/files/sim_twin.mp4');
   }
 
   // ---------- rail ----------
   const list = $('ep-list');
+  function buildRail() { list.innerHTML = '';
   EPS.forEach((e, i) => {
     const el = document.createElement('div'); el.className = 'ep';
     el.innerHTML = `<canvas width="160" height="100"></canvas><div class="tx"><b>Episode ${e.n}</b><span>${e.task}</span></div>`;
@@ -231,6 +232,7 @@
     c.strokeStyle = V('--real'); c.lineWidth = 4; c.beginPath(); c.moveTo(40, 55); c.quadraticCurveTo(80, 20 + r() * 40, 110 + r() * 20, 58); c.stroke();
     c.fillStyle = V('--text-muted'); c.fillRect(100 + r() * 30, 60, 22, 18);
   });
+  }
   root.querySelector('.rail-toggle').onclick = () => { root.classList.toggle('collapsed'); setTimeout(layout, 360); };
 
   // ---------- videos ----------
@@ -386,6 +388,16 @@
   if (window.ResizeObserver) new ResizeObserver(layout).observe(tc.parentNode); else addEventListener('resize', layout);
   M.on('screen', id => { if (id === 'episode') setTimeout(layout, 30); });
   setPlaying(true);
-  select(0); requestAnimationFrame(frame);
+  // live: real episodes from GET /files/dataset_stats.json -> episodes:[{n, task, duration}]
+  (async () => {
+    if (!window.MIMESIS_DEMO) try {
+      const st = await (await fetch('/files/dataset_stats.json?' + Date.now())).json();
+      if (st.episodes && st.episodes.length) EPS = st.episodes.map(e => ({ n: e.n, task: e.task, dur: e.duration }));
+    } catch (e) {}
+    buildRail(); select(0);
+  })();
+  M.on('screen', id => { if (id === 'episode' && !window.MIMESIS_DEMO) fetch('/files/dataset_stats.json?' + Date.now()).then(r => r.json()).then(st => {
+    if (st.episodes && st.episodes.length !== EPS.length) { EPS = st.episodes.map(e => ({ n: e.n, task: e.task, dur: e.duration })); buildRail(); select(EPS.length - 1); } }).catch(() => {}); });
+  requestAnimationFrame(frame);
 })();
 </script>

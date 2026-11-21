@@ -181,7 +181,7 @@
 
   // ---- bar chart ----
   const bars = [
-    { k: 'baseline', l: 'Baseline', s: 'IMU threshold', c: '--text-dim' },
+    { k: 'baseline', l: 'Baseline', s: 'chance', c: '--text-dim' },
     { k: 'real', l: 'Real-only', s: 'trained on real', c: '--real' },
     { k: 'sim', l: 'Sim-only', s: 'zero real labels', c: '--sim' },
     { k: 'simreal', l: 'Sim + Real', s: 'fine-tuned', c: '--sim', mix: true }
@@ -236,9 +236,10 @@
       const e = Math.pow(u, 2.1);              // quadratic-ish drift growth
       imu.push([x + e * .22 + .01 * Math.sin(t * 5) * u, y - e * .34 + .01 * Math.cos(t * 4) * u]);
     }
+    if (metrics.drift && metrics.drift.cam && metrics.drift.cam.length > 1) { cam.length = 0; imu.length = 0; metrics.drift.cam.forEach(p => cam.push(p)); metrics.drift.imu.forEach(p => imu.push(p)); }
     const P = a => a.map((p, i) => (i ? 'L' : 'M') + (PX + p[0] * PW).toFixed(1) + ' ' + (PY + p[1] * PH).toFixed(1)).join(' ');
     $('sh-dcam').setAttribute('d', P(cam)); $('sh-dimu').setAttribute('d', P(imu));
-    const a = cam[N], b = imu[N];
+    const a = cam[cam.length - 1], b = imu[imu.length - 1];
     const ax = PX + a[0] * PW, ay = PY + a[1] * PH, bx = PX + b[0] * PW, by = PY + b[1] * PH;
     $('sh-dc1').setAttribute('cx', ax); $('sh-dc1').setAttribute('cy', ay); $('sh-dc2').setAttribute('cx', bx); $('sh-dc2').setAttribute('cy', by);
     const l = $('sh-derrl'); l.setAttribute('x1', ax); l.setAttribute('y1', ay); l.setAttribute('x2', bx); l.setAttribute('y2', by);
@@ -275,13 +276,13 @@
   async function loadData() {
     // WIRE: GET /files/metrics.json and /files/dataset_stats.json (M.api + path); fall back to placeholders above
     try {
-      const [m, s] = await Promise.all(['/files/metrics.json', '/files/dataset_stats.json'].map(u => fetch((M.api || '') + u).then(r => { if (!r.ok) throw 0; return r.json(); })));
+      const [m, s] = await Promise.all(['/files/metrics.json', '/files/dataset_stats.json'].map(u => fetch((M.api || '') + u + '?' + Date.now()).then(r => { if (!r.ok) throw 0; return r.json(); })));
       metrics = Object.assign(metrics, m); stats = Object.assign(stats, s);
     } catch (e) { /* demo placeholders */ }
   }
   async function reveal() {
     reset();
-    await loadData();
+    await loadData(); buildDrift(); buildBars();
     const tk = token;
     // 1. dataset stats count up
     count($('sh-er'), stats.episodes_real, 900, fmt.int, tk); count($('sh-es'), stats.episodes_sim, 1200, fmt.int, tk);

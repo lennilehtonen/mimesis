@@ -122,8 +122,52 @@ M.on('status', s => {
   document.getElementById('st-eps').textContent = s.episodes;
 });
 
-/* ---------- DEMO data source (synthetic). Off when ?live is in the URL. ---------- */
-window.MIMESIS_DEMO = !/[?&]live\b/.test(location.search);
+/* ---------- LIVE data source: WebSocket /ws, polling /latest + /status as fallback. ----------
+   Served by receiver.py (http:) -> live. Opened as a file or with ?demo -> synthetic DEMO block below. */
+window.MIMESIS_DEMO = location.protocol === 'file:' || /[?&]demo\b/.test(location.search);
+M.camera = false;
+if (!MIMESIS_DEMO) addEventListener('DOMContentLoaded', () => {
+  let ws = null, polling = null, lastStatus = { wrist: false, hz: 0, episodes: 0 }, lastT = -1;
+  const emitImu = s => {
+    if (s.t <= lastT) return; lastT = s.t;
+    M.emit('imu', { ...s, a: Math.hypot(s.ax, s.ay, s.az), g: Math.hypot(s.gx, s.gy, s.gz) });
+  };
+  const emitStatus = st => { lastStatus = { ...lastStatus, ...st }; M.emit('status', { ...lastStatus, camera: M.camera }); M.emit('jobs', st.jobs || {}); };
+  function connect() {
+    ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws');
+    ws.onopen = () => { if (polling) { clearInterval(polling); polling = null; } };
+    ws.onmessage = e => {
+      const m = JSON.parse(e.data);
+      (m.imu || []).forEach(emitImu);
+      (m.contacts || []).forEach(c => M.emit('contact', c));
+      if (m.status) emitStatus(m.status);
+    };
+    ws.onclose = () => { startPolling(); setTimeout(connect, 2000); };
+  }
+  // fallback: GET /latest every 100 ms, GET /status every 1 s
+  let t0ns = null;
+  function startPolling() {
+    if (polling) return; let k = 0;
+    polling = setInterval(async () => {
+      try {
+        const r = await (await fetch('/latest?n=50')).json();
+        r.samples.forEach(s => { t0ns = t0ns || s.time_ns; emitImu({ t: (s.time_ns - t0ns) / 1e9, ax: s.ax, ay: s.ay, az: s.az, gx: s.gx, gy: s.gy, gz: s.gz, q: [s.qw, s.qx, s.qy, s.qz] }); });
+        if (k++ % 10 === 0) { const st = await (await fetch('/status')).json(); emitStatus({ wrist: st.hz > 1, hz: st.hz, episodes: st.episodes, recording: !!st.active_episode, jobs: st.jobs }); }
+      } catch (e) { emitStatus({ wrist: false, hz: 0 }); }
+    }, 100);
+  }
+  ['tk-real','tk-sim','tk-hours'].forEach(i => document.getElementById(i).textContent = '0');
+  connect();
+  setInterval(() => M.emit('status', { ...lastStatus, camera: M.camera }), 1000);
+  // ticker: real numbers
+  const tick = async () => { try {
+    const s = await (await fetch('/files/dataset_stats.json', { cache: 'no-store' })).json();
+    document.getElementById('tk-real').textContent = (s.episodes_real || 0).toLocaleString('en-US');
+    document.getElementById('tk-sim').textContent = (s.episodes_sim || 0).toLocaleString('en-US');
+    document.getElementById('tk-hours').textContent = (s.hours || 0).toFixed(2);
+  } catch (e) {} };
+  tick(); setInterval(tick, 5000);
+});
 if (MIMESIS_DEMO) addEventListener('DOMContentLoaded', () => {
   let t = 0, eps = 12;
   const kinds = ['GRAB', 'TAP', 'SLIP', 'SET-DOWN'];

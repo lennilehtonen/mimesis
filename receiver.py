@@ -420,6 +420,13 @@ async def upload(episode: str, file: UploadFile = File(...)):
     return {"status": "ok", "path": str(dst.relative_to(ROOT)), "bytes": dst.stat().st_size}
 
 
+@app.get("/config")
+def config(request: Request):
+    ip, iface = usb_ip()
+    port = request.url.port or 8000
+    return {"sensor_logger_url": f"http://{ip}:{port}/data", "ip": ip, "interface": iface}
+
+
 @app.get("/status")
 def status():
     return status_dict()

@@ -226,13 +226,15 @@ window.M = (() => {
   });
   M.on('contact', d => { evs.push({ t: d.t, kind: d.kind, wall: performance.now() }); if (evs.length > 40) evs.shift(); nev++; $('rc-nev').textContent = nev;
     const l = $('rc-last'); l.textContent = d.kind; l.style.color = C.ev[d.kind] || C.text; });
-  M.on('hand', d => { hand = d.joints; });
+  M.on('hand', d => { hand = d.joints; hands2 = null; });
+  let hands2 = null;   // live MediaPipe result: array of 21-joint hands in canvas-normalized coords
   M.on('status', s => {
     connected = !!s.wrist; root.classList.toggle('disc', !connected);
     $('rc-hz').textContent = s.wrist ? Math.round(s.hz) : '—'; $('rc-neps').textContent = s.episodes;
     $('rc-livetxt').textContent = s.camera ? (recOn ? 'REC' : 'LIVE') : 'NO CAMERA';
   });
   $('rc-ip').textContent = (location.hostname || '<mac-ip>') + ':8000';
+  if (!window.MIMESIS_DEMO) fetch('/config').then(r => r.json()).then(c => { $('rc-ip').textContent = c.sensor_logger_url; }).catch(() => {});
 
   /* ---- plot (Rerun style: grid, ticks, cursor) ---- */
   const pc = $('rc-plot'), px = pc.getContext('2d');
@@ -278,13 +280,29 @@ window.M = (() => {
   const cc = $('rc-cam'), cx = cc.getContext('2d'), CH = [1, 5, 9, 13, 17];
   function drawCam(ts) {
     const W = cc.width, H = cc.height, t = ts / 1000;
-    // WIRE: if video.readyState>=2 -> cx.drawImage(video,0,0,W,H) instead of the placeholder below
+    if (video.readyState >= 2 && video.videoWidth) {
+      const vw = video.videoWidth, vh = video.videoHeight, sc = Math.max(W / vw, H / vh), dw = vw * sc, dh = vh * sc, ox = (W - dw) / 2, oy = (H - dh) / 2;
+      cx.drawImage(video, ox, oy, dw, dh);
+      if (landmarker && ts - lastDet > 30) {
+        lastDet = ts;
+        try {
+          const r = landmarker.detectForVideo(video, ts);
+          hands2 = (r.landmarks || []).map(h => h.map(p => [(ox + p.x * dw) / W, (oy + p.y * dh) / H]));
+        } catch (e) { console.warn('mediapipe', e); landmarker = null; }
+      }
+      (hands2 || []).forEach(drawHand);
+      return;
+    }
     const g = cx.createLinearGradient(0, 0, W, H); g.addColorStop(0, '#171b21'); g.addColorStop(1, '#0d1014'); cx.fillStyle = g; cx.fillRect(0, 0, W, H);
     cx.strokeStyle = 'rgba(255,255,255,.05)'; cx.lineWidth = 1; cx.beginPath(); for (let y = 0; y < H; y += 60) { cx.moveTo(0, y + .5); cx.lineTo(W, y + .5); } cx.stroke();
     cx.fillStyle = 'rgba(255,255,255,.07)'; cx.fillRect(W * .12 + Math.sin(t * .3) * 20, H * .52, 300, 160);   // table
     cx.fillStyle = 'rgba(255,255,255,.12)'; cx.beginPath(); cx.roundRect(W * .66 + Math.sin(t * .7) * 30, H * .46, 90, 120, 10); cx.fill(); // cup
     cx.fillStyle = V('--text-dim'); cx.font = font(18); cx.textAlign = 'right'; cx.textBaseline = 'bottom'; cx.fillText('chest-cam placeholder', W - 16, H - 14);
-    if (hand) {
+    if (hand) drawHand(hand);
+  }
+  function drawHand(hand) {
+    const W = cc.width, H = cc.height;
+    {
       const P = j => [j[0] * W, j[1] * H];
       cx.strokeStyle = C.real; cx.lineWidth = 4; cx.lineCap = 'round'; cx.shadowColor = C.real; cx.shadowBlur = 10; cx.beginPath();
       for (const s of CH) { let p = P(hand[0]); cx.moveTo(p[0], p[1]); for (let k = 0; k < 4; k++) { p = P(hand[s + k]); cx.lineTo(p[0], p[1]); } }
@@ -299,14 +317,54 @@ window.M = (() => {
   let recOn = false, recT0 = 0;
   const btn = $('rc-rec'), txt = $('rc-rectxt'), fmt = s => String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(Math.floor(s % 60)).padStart(2, '0');
   async function post(path, body) {
-    try { await fetch((M.api || '') + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) }); } catch (e) { /* offline demo */ }
+    try { const r = await fetch((M.api || '') + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) }); return await r.json(); } catch (e) { return null; /* offline demo */ }
+  }
+  /* ---- live camera (Continuity Camera via getUserMedia) + MediaPipe Tasks JS + MediaRecorder ---- */
+  const video = $('rc-video'); let landmarker = null, lastDet = 0, stream = null, recorder = null, chunks = [], curEp = null;
+  async function startCam() {
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ video: { width: 1920, height: 1080 }, audio: true });
+      const devs = await navigator.mediaDevices.enumerateDevices();
+      const iph = devs.find(d => d.kind === 'videoinput' && /iphone|continuity/i.test(d.label));
+      const curId = stream.getVideoTracks()[0].getSettings().deviceId;
+      if (iph && iph.deviceId !== curId) {
+        stream.getTracks().forEach(t => t.stop());
+        stream = await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: iph.deviceId }, width: 1920, height: 1080 }, audio: true });
+      }
+      video.srcObject = stream; await video.play(); M.camera = true;
+      const st = stream.getVideoTracks()[0].getSettings(); $('rc-fps').textContent = Math.round(st.frameRate || 30) + ' fps · ' + st.height + 'p';
+    } catch (e) { console.warn('camera', e); M.camera = false; $('rc-fps').textContent = 'no camera'; }
+    try {
+      const { FilesetResolver, HandLandmarker } = await import('/vendor/mediapipe/vision_bundle.mjs');
+      const fs = await FilesetResolver.forVisionTasks('/vendor/mediapipe/wasm');
+      landmarker = await HandLandmarker.createFromOptions(fs, { baseOptions: { modelAssetPath: '/vendor/mediapipe/hand_landmarker.task', delegate: 'GPU' }, runningMode: 'VIDEO', numHands: 2 });
+    } catch (e) { console.warn('mediapipe js failed, skeleton comes from hands.py overlay MP4 after processing', e); }
+  }
+  if (!window.MIMESIS_DEMO) startCam();
+  function startRecorder() {
+    if (!stream || !window.MediaRecorder) return;
+    chunks = []; const mt = ['video/mp4', 'video/webm;codecs=vp9,opus', 'video/webm'].find(t => MediaRecorder.isTypeSupported(t));
+    recorder = new MediaRecorder(stream, mt ? { mimeType: mt, videoBitsPerSecond: 8e6 } : {});
+    recorder.ondataavailable = e => e.data.size && chunks.push(e.data); recorder.start(1000);
+  }
+  function stopRecorder(ep) {
+    if (!recorder) return; const rec = recorder; recorder = null;
+    rec.onstop = async () => {
+      const blob = new Blob(chunks, { type: rec.mimeType }); const fd = new FormData();
+      fd.append('file', blob, ep + (rec.mimeType.includes('mp4') ? '.mp4' : '.webm'));
+      $('rc-livetxt').textContent = 'UPLOADING';
+      try { await fetch('/upload/' + ep, { method: 'POST', body: fd }); $('rc-livetxt').textContent = 'PROCESSING'; await post('/process/' + ep); }
+      catch (e) { console.warn('upload', e); }
+      setTimeout(() => $('rc-livetxt').textContent = 'LIVE', 3000);
+    };
+    rec.stop();
   }
   btn.addEventListener('click', () => {
     recOn = !recOn; root.classList.toggle('recording', recOn);
     if (recOn) { recT0 = performance.now(); txt.textContent = '00:00'; $('rc-livetxt').textContent = 'REC';
-      if (!window.MIMESIS_DEMO) post('/episode/start', { task: $('rc-task').value }); // WIRE: POST /episode/start {task}
+      if (!window.MIMESIS_DEMO) post('/episode/start', { task: $('rc-task').value }).then(r => { curEp = r && r.episode_id; startRecorder(); });
     } else { txt.textContent = 'RECORD'; $('rc-livetxt').textContent = 'LIVE';
-      if (!window.MIMESIS_DEMO) post('/episode/stop'); // WIRE: POST /episode/stop
+      if (!window.MIMESIS_DEMO) { const ep = curEp; post('/episode/stop').then(() => ep && stopRecorder(ep)); }
     }
     M.emit('rec', { on: recOn, t0: recT0 / 1000 });
   });
@@ -480,7 +538,7 @@ window.M = (() => {
 
   // ---------- episodes (demo list) ----------
   // WIRE: GET /files/dataset_stats.json -> {episodes:[{n,task,duration}], frames, fps}; per-episode GET /files/episode_<n>.json
-  const EPS = [
+  let EPS = [
     { n: 0, task: 'Pick up the cup', dur: 12 }, { n: 1, task: 'Stack two blocks', dur: 12 },
     { n: 2, task: 'Pour into bowl', dur: 12 }, { n: 3, task: 'Open the drawer', dur: 12 },
     { n: 4, task: 'Hand over the bottle', dur: 12 }, { n: 5, task: 'Wipe the table', dur: 12 }
@@ -504,7 +562,7 @@ window.M = (() => {
       contacts.forEach(c => { const d = tt - c.t; if (d > 0 && d < .5) a += Math.exp(-d * 10) * 7 * Math.sin(d * 70) * (c.kind === 'SLIP' ? 1.3 : 1); });
       imu[i] = a;
     }
-    return { n, task: EPS[n].task, duration: dur, fps: FPS, frames: dur * FPS, sync_offset_ms: [38, 41, 35, 44, 39, 42][n], contacts, gripper, imu, imu_hz: 100 };
+    return { n, task: (EPS[n] || EPS[0]).task, duration: dur, fps: FPS, frames: dur * FPS, sync_offset_ms: [38, 41, 35, 44, 39, 42][n], contacts, gripper, imu, imu_hz: 100 };
   }
 
   async function loadEpisode(n) {
@@ -515,8 +573,8 @@ window.M = (() => {
     if (d) {
       d.imu = Float32Array.from(d.imu || []); d.imu_hz = d.imu_hz || 100; d.fps = d.fps || FPS;
       d.frames = d.frames || Math.round(d.duration * d.fps); d.contacts = d.contacts || []; d.gripper = d.gripper || [];
-      d.task = d.task || EPS[n].task;
-    } else d = demoEpisode(n % EPS.length);
+      d.task = d.task || (EPS[n] || {}).task || 'episode';
+    } else d = demoEpisode(n % 6);
     d.n = n; return d;
   }
 
@@ -531,11 +589,12 @@ window.M = (() => {
     $('ep-m-fr').textContent = d.frames.toLocaleString('en-US'); $('ep-tot').textContent = '/ ' + fmtT(d.duration);
     $('ep-clog').innerHTML = d.contacts.map((c, i) => `<div class="cl" data-i="${i}" style="--c:var(${KIND_VAR[c.kind]})"><b>${c.kind}</b><span>${fmtT(c.t)}</span></div>`).join('');
     // WIRE: per-episode videos; falls back to the canvas placeholder if the file is missing
-    attachVideo('real', '/files/episode_overlay.mp4'); attachVideo('sim', '/files/sim_twin.mp4');
+    attachVideo('real', d.overlay || '/files/episode_overlay.mp4'); attachVideo('sim', d.twin || '/files/sim_twin.mp4');
   }
 
   // ---------- rail ----------
   const list = $('ep-list');
+  function buildRail() { list.innerHTML = '';
   EPS.forEach((e, i) => {
     const el = document.createElement('div'); el.className = 'ep';
     el.innerHTML = `<canvas width="160" height="100"></canvas><div class="tx"><b>Episode ${e.n}</b><span>${e.task}</span></div>`;
@@ -548,6 +607,7 @@ window.M = (() => {
     c.strokeStyle = V('--real'); c.lineWidth = 4; c.beginPath(); c.moveTo(40, 55); c.quadraticCurveTo(80, 20 + r() * 40, 110 + r() * 20, 58); c.stroke();
     c.fillStyle = V('--text-muted'); c.fillRect(100 + r() * 30, 60, 22, 18);
   });
+  }
   root.querySelector('.rail-toggle').onclick = () => { root.classList.toggle('collapsed'); setTimeout(layout, 360); };
 
   // ---------- videos ----------
@@ -703,7 +763,17 @@ window.M = (() => {
   if (window.ResizeObserver) new ResizeObserver(layout).observe(tc.parentNode); else addEventListener('resize', layout);
   M.on('screen', id => { if (id === 'episode') setTimeout(layout, 30); });
   setPlaying(true);
-  select(0); requestAnimationFrame(frame);
+  // live: real episodes from GET /files/dataset_stats.json -> episodes:[{n, task, duration}]
+  (async () => {
+    if (!window.MIMESIS_DEMO) try {
+      const st = await (await fetch('/files/dataset_stats.json?' + Date.now())).json();
+      if (st.episodes && st.episodes.length) EPS = st.episodes.map(e => ({ n: e.n, task: e.task, dur: e.duration }));
+    } catch (e) {}
+    buildRail(); select(0);
+  })();
+  M.on('screen', id => { if (id === 'episode' && !window.MIMESIS_DEMO) fetch('/files/dataset_stats.json?' + Date.now()).then(r => r.json()).then(st => {
+    if (st.episodes && st.episodes.length !== EPS.length) { EPS = st.episodes.map(e => ({ n: e.n, task: e.task, dur: e.duration })); buildRail(); select(EPS.length - 1); } }).catch(() => {}); });
+  requestAnimationFrame(frame);
 })();
 </script>
 
@@ -989,6 +1059,8 @@ window.M = (() => {
   const dn = $('mx-donut'), dg = dn.getContext('2d');
   function slipCount(c) {
     if (c <= 0) return 0;
+    const lj = liveJob || lastLive;
+    if (lj && lj.progress && lj.progress.done) return Math.min(c, Math.round(c * lj.progress.slip / lj.progress.done));
     const prog = c / N, jit = 4 * Math.sin(c / 11) * (1 - Math.min(1, prog) * 1);
     return Math.max(0, Math.min(c, Math.round(c * RATE + (state === 'run' ? jit : 0))));
   }
@@ -1035,6 +1107,14 @@ window.M = (() => {
     seedBase++; N = +slider.value; setState('run'); t0 = performance.now(); cAnim = null; setNum(0); genCount = 0; thumbs.forEach(t => { t.v = null; t.el.classList.remove('full', 'slip'); t.sp.textContent = ''; t.g.clearRect(0, 0, 170, 68); });
     tiles.forEach(t => { t.full = false; t.v = null; t.el.classList.remove('full', 'slip', 'flash'); t.vid.classList.remove('on'); });
     lastThumb = 0; drawDonut(0); status();
+    if (!window.MIMESIS_DEMO) { lastLive = null; liveJob = { state: 'running', progress: { done: 0, total: N, ok: 0, slip: 0 } }; liveStart = performance.now();
+      fetch(`/multiply?n=${N}&render=9`, { method: 'POST' }).then(r => r.json()).then(j => { if (j.state === 'error') liveJob = null; }).catch(() => { liveJob = null; }); }
+  }
+  // live: progress of the backend multiply job (sim/augment.py in a subprocess) arrives over /ws
+  let liveJob = null, liveStart = 0;
+  M.on('jobs', js => { if (liveJob && js.multiply && performance.now() - liveStart > 1500) liveJob = js.multiply; });
+  function reloadLabels() {
+    return fetch('/files/variants/labels.json?' + Date.now()).then(r => r.ok ? r.json() : null).then(j => { if (Array.isArray(j) && j.length) { labels = j; videoOK = true; } }).catch(() => {});
   }
   $('mx-gen').addEventListener('click', generate);
   addEventListener('keydown', e => { if (e.target.closest('input,select,textarea,button')) return; if (e.key === 'g' || e.key === 'Enter') { if (root.classList.contains('on')) generate(); } });
@@ -1045,19 +1125,27 @@ window.M = (() => {
   });
 
   // ---- main loop ----
-  let lastThumb = 0, lastMs = 0;
+  let lastThumb = 0, lastMs = 0, lastLive = null;
   function tick(now) {
     requestAnimationFrame(tick);
     if (!root.classList.contains('on')) return;
     if (state === 'run') {
-      const el = now - t0, p = Math.min(1, el / GEN_MS);
+      let el = now - t0, p = Math.min(1, el / GEN_MS);
+      if (liveJob) {
+        const pr = liveJob.progress || { done: 0, total: N };
+        p = liveJob.state === 'done' ? 1 : Math.min(.995, pr.done / Math.max(1, pr.total));
+        el = p * GEN_MS;
+        if (liveJob.state === 'error') { liveJob = null; p = 1; }
+        else if (p >= 1) { const lj = liveJob; liveJob = null; reloadLabels().then(() => { tiles.forEach((t, j) => land(t, j, true)); }); lastLive = lj; }
+        setNum(Math.round(N * p));
+      } else
       setNum(Math.round(N * (1 - Math.pow(1 - p, 3))));
       $('mx-genfill').style.width = (p * 100) + '%';
       tiles.forEach((t, j) => { if (!t.full && el >= t.tLand) land(t, j, el - t.tLand > 400); });
       if (now - lastThumb > 140 && counter > 0) { lastThumb = now; pushThumb(Math.max(0, Math.round(counter) - 1)); }
       drawDonut(counter); genCount = counter; status();
-      if (now - lastMs > 180) { lastMs = now; $('mx-ms').textContent = (2.9 + Math.random() * .5).toFixed(1) + ' ms/step'; }
-      if (p >= 1) { setNum(N); genCount = N; setState('done'); $('mx-genfill').style.width = '0'; drawDonut(N); status(); $('mx-ms').textContent = '3.1 ms/step'; }
+      if (now - lastMs > 180) { lastMs = now; $('mx-ms').textContent = window.MIMESIS_DEMO ? (2.9 + Math.random() * .5).toFixed(1) + ' ms/step' : (counter / Math.max(.1, (now - t0) / 1000)).toFixed(1) + ' variants/s'; }
+      if (p >= 1) { setNum(N); genCount = N; setState('done'); $('mx-genfill').style.width = '0'; drawDonut(N); status(); if (window.MIMESIS_DEMO) $('mx-ms').textContent = '3.1 ms/step'; }
     } else if (cAnim) {
       const p = Math.min(1, (now - cAnim.st) / cAnim.dur); setNum(Math.round(cAnim.from + (cAnim.to - cAnim.from) * ease(p))); if (p >= 1) cAnim = null;
     }
@@ -1251,7 +1339,7 @@ window.M = (() => {
 
   // ---- bar chart ----
   const bars = [
-    { k: 'baseline', l: 'Baseline', s: 'IMU threshold', c: '--text-dim' },
+    { k: 'baseline', l: 'Baseline', s: 'chance', c: '--text-dim' },
     { k: 'real', l: 'Real-only', s: 'trained on real', c: '--real' },
     { k: 'sim', l: 'Sim-only', s: 'zero real labels', c: '--sim' },
     { k: 'simreal', l: 'Sim + Real', s: 'fine-tuned', c: '--sim', mix: true }
@@ -1306,9 +1394,10 @@ window.M = (() => {
       const e = Math.pow(u, 2.1);              // quadratic-ish drift growth
       imu.push([x + e * .22 + .01 * Math.sin(t * 5) * u, y - e * .34 + .01 * Math.cos(t * 4) * u]);
     }
+    if (metrics.drift && metrics.drift.cam && metrics.drift.cam.length > 1) { cam.length = 0; imu.length = 0; metrics.drift.cam.forEach(p => cam.push(p)); metrics.drift.imu.forEach(p => imu.push(p)); }
     const P = a => a.map((p, i) => (i ? 'L' : 'M') + (PX + p[0] * PW).toFixed(1) + ' ' + (PY + p[1] * PH).toFixed(1)).join(' ');
     $('sh-dcam').setAttribute('d', P(cam)); $('sh-dimu').setAttribute('d', P(imu));
-    const a = cam[N], b = imu[N];
+    const a = cam[cam.length - 1], b = imu[imu.length - 1];
     const ax = PX + a[0] * PW, ay = PY + a[1] * PH, bx = PX + b[0] * PW, by = PY + b[1] * PH;
     $('sh-dc1').setAttribute('cx', ax); $('sh-dc1').setAttribute('cy', ay); $('sh-dc2').setAttribute('cx', bx); $('sh-dc2').setAttribute('cy', by);
     const l = $('sh-derrl'); l.setAttribute('x1', ax); l.setAttribute('y1', ay); l.setAttribute('x2', bx); l.setAttribute('y2', by);
@@ -1345,13 +1434,13 @@ window.M = (() => {
   async function loadData() {
     // WIRE: GET /files/metrics.json and /files/dataset_stats.json (M.api + path); fall back to placeholders above
     try {
-      const [m, s] = await Promise.all(['/files/metrics.json', '/files/dataset_stats.json'].map(u => fetch((M.api || '') + u).then(r => { if (!r.ok) throw 0; return r.json(); })));
+      const [m, s] = await Promise.all(['/files/metrics.json', '/files/dataset_stats.json'].map(u => fetch((M.api || '') + u + '?' + Date.now()).then(r => { if (!r.ok) throw 0; return r.json(); })));
       metrics = Object.assign(metrics, m); stats = Object.assign(stats, s);
     } catch (e) { /* demo placeholders */ }
   }
   async function reveal() {
     reset();
-    await loadData();
+    await loadData(); buildDrift(); buildBars();
     const tk = token;
     // 1. dataset stats count up
     count($('sh-er'), stats.episodes_real, 900, fmt.int, tk); count($('sh-es'), stats.episodes_sim, 1200, fmt.int, tk);
@@ -1425,8 +1514,52 @@ M.on('status', s => {
   document.getElementById('st-eps').textContent = s.episodes;
 });
 
-/* ---------- DEMO data source (synthetic). Off when ?live is in the URL. ---------- */
-window.MIMESIS_DEMO = !/[?&]live\b/.test(location.search);
+/* ---------- LIVE data source: WebSocket /ws, polling /latest + /status as fallback. ----------
+   Served by receiver.py (http:) -> live. Opened as a file or with ?demo -> synthetic DEMO block below. */
+window.MIMESIS_DEMO = location.protocol === 'file:' || /[?&]demo\b/.test(location.search);
+M.camera = false;
+if (!MIMESIS_DEMO) addEventListener('DOMContentLoaded', () => {
+  let ws = null, polling = null, lastStatus = { wrist: false, hz: 0, episodes: 0 }, lastT = -1;
+  const emitImu = s => {
+    if (s.t <= lastT) return; lastT = s.t;
+    M.emit('imu', { ...s, a: Math.hypot(s.ax, s.ay, s.az), g: Math.hypot(s.gx, s.gy, s.gz) });
+  };
+  const emitStatus = st => { lastStatus = { ...lastStatus, ...st }; M.emit('status', { ...lastStatus, camera: M.camera }); M.emit('jobs', st.jobs || {}); };
+  function connect() {
+    ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws');
+    ws.onopen = () => { if (polling) { clearInterval(polling); polling = null; } };
+    ws.onmessage = e => {
+      const m = JSON.parse(e.data);
+      (m.imu || []).forEach(emitImu);
+      (m.contacts || []).forEach(c => M.emit('contact', c));
+      if (m.status) emitStatus(m.status);
+    };
+    ws.onclose = () => { startPolling(); setTimeout(connect, 2000); };
+  }
+  // fallback: GET /latest every 100 ms, GET /status every 1 s
+  let t0ns = null;
+  function startPolling() {
+    if (polling) return; let k = 0;
+    polling = setInterval(async () => {
+      try {
+        const r = await (await fetch('/latest?n=50')).json();
+        r.samples.forEach(s => { t0ns = t0ns || s.time_ns; emitImu({ t: (s.time_ns - t0ns) / 1e9, ax: s.ax, ay: s.ay, az: s.az, gx: s.gx, gy: s.gy, gz: s.gz, q: [s.qw, s.qx, s.qy, s.qz] }); });
+        if (k++ % 10 === 0) { const st = await (await fetch('/status')).json(); emitStatus({ wrist: st.hz > 1, hz: st.hz, episodes: st.episodes, recording: !!st.active_episode, jobs: st.jobs }); }
+      } catch (e) { emitStatus({ wrist: false, hz: 0 }); }
+    }, 100);
+  }
+  ['tk-real','tk-sim','tk-hours'].forEach(i => document.getElementById(i).textContent = '0');
+  connect();
+  setInterval(() => M.emit('status', { ...lastStatus, camera: M.camera }), 1000);
+  // ticker: real numbers
+  const tick = async () => { try {
+    const s = await (await fetch('/files/dataset_stats.json', { cache: 'no-store' })).json();
+    document.getElementById('tk-real').textContent = (s.episodes_real || 0).toLocaleString('en-US');
+    document.getElementById('tk-sim').textContent = (s.episodes_sim || 0).toLocaleString('en-US');
+    document.getElementById('tk-hours').textContent = (s.hours || 0).toFixed(2);
+  } catch (e) {} };
+  tick(); setInterval(tick, 5000);
+});
 if (MIMESIS_DEMO) addEventListener('DOMContentLoaded', () => {
   let t = 0, eps = 12;
   const kinds = ['GRAB', 'TAP', 'SLIP', 'SET-DOWN'];
